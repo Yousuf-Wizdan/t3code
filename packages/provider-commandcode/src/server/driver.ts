@@ -36,6 +36,7 @@ import {
   type ProviderSnapshotSettings,
 } from "@t3tools/provider-core/server/snapshotSettings";
 import { makeCommandcodeTextGeneration } from "./textGeneration.ts";
+import { commandcodeUsageReader } from "./usage.ts";
 import { COMMANDCODE_DRIVER_KIND } from "./acpSupport.ts";
 
 const decodeCommandcodeSettings = Schema.decodeSync(CommandcodeSettings);
@@ -79,12 +80,17 @@ export type CommandcodeDriverEnv =
   | Path.Path
   | ProviderHost.ProviderHost;
 
-export const CommandcodeDriver: ProviderDriver<CommandcodeSettings, CommandcodeDriverEnv> = {
+export const CommandcodeDriver: ProviderDriver<
+  CommandcodeSettings,
+  CommandcodeDriverEnv,
+  Path.Path
+> = {
   driverKind: COMMANDCODE_DRIVER_KIND,
   metadata: {
     displayName: "Command Code",
     supportsMultipleInstances: true,
   },
+  usage: commandcodeUsageReader,
   configSchema: CommandcodeSettings,
   defaultConfig: (): CommandcodeSettings => decodeCommandcodeSettings({}),
   create: Effect.fn("CommandcodeDriver.create")(function* ({

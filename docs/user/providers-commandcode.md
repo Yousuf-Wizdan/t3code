@@ -38,7 +38,7 @@ An explicit approval or sandbox policy always launches Command Code in its Stand
 
 ## Sessions
 
-Expand the provider card in **Settings → Providers**, choose a project, and select **List sessions** to import an existing Command Code session into a thread. Importing the same session again returns the same thread.
+Command Code does not advertise ACP session listing and import, so T3 Code shows no **List sessions** button for it. To continue previous work, open the same project folder in a new thread.
 
 ## Checkpoints
 
@@ -66,7 +66,8 @@ State is read first, so the command only runs when the state actually differs �
 
 ## Not supported yet
 
-- Usage and credit limits in T3 Code's Usage screens. Command Code has no machine-readable quota command; run `/usage` in Command Code for your plan and credits.
+- Live quota and credit limits in T3 Code's Usage screens. Usage history (tokens and provider-reported cost) appears from local session transcripts; live limits are unavailable — run `/usage` in Command Code for your plan and credits.
+- Native session listing and import. Command Code does not advertise session management over ACP, so previously started sessions cannot be listed or imported.
 - Dedicated sub-agent threads. Command Code's sub-agents report as tool activity inside the parent thread.
 
 See [provider setup](./install.md#providers) and [Permission modes](./permission-modes.md).
