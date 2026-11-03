@@ -7984,11 +7984,22 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           }
           if (!isNativeSlashCommand) {
             const sessionSetup = yield* Ref.get(activeSessionSetup);
+            const selectedModel = turnInput.modelSelection.model;
+            // "default"/"auto" select whatever the session runs; name that model so the
+            // agent can answer "which model are you" instead of hearing a sentinel.
+            const sessionModel =
+              sessionSetup?.sessionSetupResult.models?.currentModelId ??
+              findModelConfigOption(sessionSetup?.sessionSetupResult.configOptions ?? [])
+                ?.currentValue;
+            const effectiveModel =
+              selectedModel.length === 0 || selectedModel === "auto" || selectedModel === "default"
+                ? (sessionModel ?? selectedModel)
+                : selectedModel;
             prompt.push({
               type: "text",
               text: buildRuntimeInstructions({
                 harness: flavor.runtimeHarness ?? driver,
-                model: turnInput.modelSelection.model,
+                model: effectiveModel,
                 pullRequestLinking:
                   sessionSetup === null ||
                   flavor.sessionCarriesPullRequestLinking?.(sessionSetup.initializeResult) !== true,

@@ -352,7 +352,11 @@ export const KIRO_MODEL_SELECTION = {
   model: "claude-haiku-4.5",
 } satisfies ModelSelection;
 
-export const OPENCODE_MODEL_SELECTION = {
+/** Command Code fixtures run on its Default; the replay adapter has no probed model, so it writes none. */
+export const COMMANDCODE_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("commandcode"),
+  model: "default",
+} satisfies ModelSelection;export const OPENCODE_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("opencode"),
   model: "openai/gpt-5.4-mini",
   options: [{ id: "agent", value: "build" }],

@@ -410,7 +410,15 @@ type AcpSelectConfigOption = Extract<
 export function findModelConfigOption(
   configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption> | null | undefined,
 ): AcpSelectConfigOption | undefined {
-  return configOptions?.find(
+  const options = configOptions ?? [];
+  // Several category-model selects can exist (fx also offers its backend
+  // selector); the conventional `model` id is the session's model.
+  const byId = options.find(
+    (option): option is AcpSelectConfigOption =>
+      option.category === "model" && option.type === "select" && option.id.trim() === "model",
+  );
+  if (byId !== undefined) return byId;
+  return options.find(
     (option): option is AcpSelectConfigOption =>
       option.category === "model" && option.type === "select" && option.id.trim().length > 0,
   );

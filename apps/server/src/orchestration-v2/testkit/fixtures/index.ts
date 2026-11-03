@@ -244,6 +244,7 @@ import {
   CODEX_MODEL_SELECTION,
   CURSOR_MODEL_SELECTION,
   FX_MODEL_SELECTION,
+  COMMANDCODE_MODEL_SELECTION,
   GROK_MODEL_SELECTION,
   KIRO_MODEL_SELECTION,
   MUSE_MODEL_SELECTION,
@@ -823,9 +824,15 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         assertOutput: assertSimpleOutput,
       },
       {
-        driver: ProviderDriverKind.make("kiro"),
+driver: ProviderDriverKind.make("kiro"),
         transcriptFile: new URL("./simple/kiro_transcript.ndjson", import.meta.url),
         modelSelection: KIRO_MODEL_SELECTION,
+        assertOutput: assertSimpleOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("commandcode"),
+        transcriptFile: new URL("./simple/commandcode_transcript.ndjson", import.meta.url),
+        modelSelection: COMMANDCODE_MODEL_SELECTION,
         assertOutput: assertSimpleOutput,
       },
       {
@@ -972,6 +979,16 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: FX_MODEL_SELECTION,
         runtimePolicyOverride: READ_ONLY_ON_REQUEST_POLICY,
         assertOutput: assertToolCallReadOnlyOnRequestFxOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("commandcode"),
+        transcriptFile: new URL(
+          "./tool_call_read_only_on_request/commandcode_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: COMMANDCODE_MODEL_SELECTION,
+        runtimePolicyOverride: READ_ONLY_ON_REQUEST_POLICY,
+        assertOutput: assertToolCallReadOnlyOnRequestOutput,
       },
       {
         driver: ProviderDriverKind.make("acpRegistry"),
@@ -1489,6 +1506,12 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: MUSE_MODEL_SELECTION,
         assertOutput: assertMuseMultiTurnOutput,
       },
+      {
+        driver: ProviderDriverKind.make("commandcode"),
+        transcriptFile: new URL("./multi_turn/commandcode_transcript.ndjson", import.meta.url),
+        modelSelection: COMMANDCODE_MODEL_SELECTION,
+        assertOutput: assertMultiTurnOutput,
+      },
     ],
   },
   {
@@ -1646,6 +1669,12 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: ACP_REGISTRY_MODEL_SELECTION,
         assertOutput: assertQueuedTurnOutput,
       },
+      {
+        driver: ProviderDriverKind.make("commandcode"),
+        transcriptFile: new URL("./queued_turn/commandcode_transcript.ndjson", import.meta.url),
+        modelSelection: COMMANDCODE_MODEL_SELECTION,
+        assertOutput: assertQueuedTurnOutput,
+      },
     ],
   },
   {
@@ -1791,6 +1820,15 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: PI_MODEL_SELECTION,
         assertOutput: assertPiMessageSteeringOutput,
       },
+      {
+        driver: ProviderDriverKind.make("commandcode"),
+        transcriptFile: new URL(
+          "./message_steering/commandcode_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: COMMANDCODE_MODEL_SELECTION,
+        assertOutput: assertGrokMessageSteeringOutput,
+      },
     ],
   },
   {
@@ -1851,6 +1889,13 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./turn_interrupt/muse_transcript.ndjson", import.meta.url),
         modelSelection: MUSE_MODEL_SELECTION,
         assertOutput: assertMuseTurnInterruptOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("commandcode"),
+        transcriptFile: new URL("./turn_interrupt/commandcode_transcript.ndjson", import.meta.url),
+        modelSelection: COMMANDCODE_MODEL_SELECTION,
+        runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
+        assertOutput: assertTurnInterruptOutput,
       },
     ],
   },

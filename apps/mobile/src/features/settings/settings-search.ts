@@ -64,6 +64,8 @@ const SETTINGS_SEARCH_TERMS = {
     "claude",
     "cursor",
     "opencode",
+    "commandcode",
+    "command code",
     "sign in",
     "login",
     "auth",
