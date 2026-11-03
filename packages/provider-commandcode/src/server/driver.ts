@@ -1,6 +1,6 @@
 import { CommandcodeSettings } from "../settings.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import type * as Crypto from "effect/Crypto";
+import type * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -74,7 +74,7 @@ const UPDATE: ProviderMaintenanceCapabilitiesResolver = {
 export type CommandcodeDriverEnv =
   | CommandcodeAdapterV2DriverEnv
   | ChildProcessSpawner.ChildProcessSpawner
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
   | FileSystem.FileSystem
   | Path.Path
   | ProviderHost.ProviderHost;

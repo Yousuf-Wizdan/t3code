@@ -1,6 +1,6 @@
 import { ProviderDriverKind, type RuntimeMode } from "@t3tools/contracts";
 import type { CommandcodeSettings } from "../settings.ts";
-import type * as Crypto from "effect/Crypto";
+import type * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -196,7 +196,7 @@ export const makeCommandcodeAcpRuntime = Effect.fn("makeCommandcodeAcpRuntime")(
 ): Effect.fn.Return<
   AcpSessionRuntime.AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
-  ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
+  ChildProcessSpawner.ChildProcessSpawner | SecureRandom.SecureRandom | Scope.Scope
 > {
   const { commandcodeSettings, environment, platform, fileSystem, ...runtimeOptions } = input;
   yield* ensureCommandcodeTasteState(

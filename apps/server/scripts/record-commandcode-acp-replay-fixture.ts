@@ -4,6 +4,7 @@
  * `cmdc` on PATH (or T3_COMMANDCODE_BIN); HOME stays the user's real login:
  *   node scripts/record-commandcode-acp-replay-fixture.ts --scenario simple
  */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeOS from "node:os";
 import { ProviderInstanceId, type ProviderReplayEntry } from "@t3tools/contracts";
@@ -413,8 +414,11 @@ const recordScenario = Effect.fn("recordCommandcodeScenario")(function* (fixture
   ).pipe(
     Layer.provide(
       Layer.mergeAll(
-        TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
+        TestProviderHost.layer().pipe(
+          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+        ),
         NodeServices.layer,
+        NodeCrypto.layer,
         IdAllocator.layer,
       ),
     ),
