@@ -1,7 +1,7 @@
 // Normalizes `cmd acp` live `available_commands_update` payloads into the
 // provider snapshot's slash commands. The initialize response never carries
-// commands, so this is the only channel; the machine snapshot stays
-// compact-only until the first session reports in.
+// commands, so this is the only channel; the machine snapshot stays on the
+// base seeds (compact, goal) until the first session reports in.
 import type {
   ProviderInstanceId,
   ServerProvider,
@@ -10,6 +10,15 @@ import type {
 import type * as EffectAcpSchema from "effect-acp/compat";
 import * as Effect from "effect/Effect";
 import { COMPACT_SLASH_COMMAND } from "@t3tools/provider-core/server/snapshotProbe";
+
+// Command Code parses `/goal` from the prompt, but the harness never
+// advertises it over ACP, so the menu seeds it. Pause/resume are rejected
+// server-side, hence the narrower hint.
+export const GOAL_SLASH_COMMAND = {
+  name: "goal",
+  description: "Set a goal Command Code keeps working toward until it is done",
+  input: { hint: "Objective, or clear" },
+} satisfies ServerProviderSlashCommand;
 
 // Wrong-surface mod commands: editor setup for other editors, not T3 threads.
 const HIDDEN_COMMANDCODE_COMMANDS = new Set(["acp"]);
@@ -21,28 +30,44 @@ export function commandcodeSkillNames(
   return new Set(skills.map((skill) => skill.name.trim().toLowerCase()));
 }
 
+export const COMMANDCODE_BASE_SLASH_COMMANDS: ReadonlyArray<ServerProviderSlashCommand> = [
+  COMPACT_SLASH_COMMAND,
+  GOAL_SLASH_COMMAND,
+];
+
 export function commandcodeSlashCommandsFromAvailableCommands(
   commands: ReadonlyArray<EffectAcpSchema.AvailableCommand>,
   skillNames: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<ServerProviderSlashCommand> {
-  const byName = new Map<string, ServerProviderSlashCommand>();
+  const byName = new Map<string, ServerProviderSlashCommand>(
+    COMMANDCODE_BASE_SLASH_COMMANDS.map((command) => [command.name, command]),
+  );
   for (const command of commands) {
     const name = command.name.trim();
     if (name.length === 0) continue;
     const lower = name.toLowerCase();
     if (HIDDEN_COMMANDCODE_COMMANDS.has(lower)) continue;
     if (skillNames.has(lower)) continue;
-    if (byName.has(name)) continue;
     const description = command.description.trim();
     const hint = command.input?.type === "text" ? command.input.hint.trim() : "";
+    // A live re-advertise of a base seed keeps its seat with live wording;
+    // later duplicates stay dropped. Map.set on an existing key preserves
+    // insertion order, so the base order never shifts.
+    if (byName.has(name)) {
+      if (name === COMPACT_SLASH_COMMAND.name || name === GOAL_SLASH_COMMAND.name) {
+        byName.set(name, {
+          name,
+          ...(description ? { description } : {}),
+          ...(hint ? { input: { hint } } : {}),
+        });
+      }
+      continue;
+    }
     byName.set(name, {
       name,
       ...(description ? { description } : {}),
       ...(hint ? { input: { hint } } : {}),
     });
-  }
-  if (!byName.has(COMPACT_SLASH_COMMAND.name)) {
-    return [COMPACT_SLASH_COMMAND, ...byName.values()];
   }
   return [...byName.values()];
 }
@@ -50,10 +75,7 @@ export function commandcodeSlashCommandsFromAvailableCommands(
 // The adapter flavor and the driver snapshot live in different objects with
 // no shared service between them, so the latest payload per instance waits
 // here until `snapshotForCwd` merges it on pull.
-const liveCommandsByInstance = new Map<
-  string,
-  ReadonlyArray<EffectAcpSchema.AvailableCommand>
->();
+const liveCommandsByInstance = new Map<string, ReadonlyArray<EffectAcpSchema.AvailableCommand>>();
 
 export const publishCommandcodeLiveCommands = (
   instanceId: ProviderInstanceId,

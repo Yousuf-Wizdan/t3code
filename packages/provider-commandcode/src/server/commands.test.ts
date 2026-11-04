@@ -16,7 +16,7 @@ const command = (name: string, description = `${name} does things`, input?: { hi
 });
 
 describe("commandcodeSlashCommandsFromAvailableCommands", () => {
-  it("normalizes live commands and seeds compact when unadvertised", () => {
+  it("normalizes live commands and seeds base entries when unadvertised", () => {
     expect(
       commandcodeSlashCommandsFromAvailableCommands([
         command("peek", "Peek at the session"),
@@ -24,17 +24,24 @@ describe("commandcodeSlashCommandsFromAvailableCommands", () => {
       ]),
     ).toEqual([
       { name: "compact", description: "Summarize the conversation and reduce context usage" },
+      {
+        name: "goal",
+        description: "Set a goal Command Code keeps working toward until it is done",
+        input: { hint: "Objective, or clear" },
+      },
       { name: "peek", description: "Peek at the session" },
       { name: "herdr", description: "Herd agents", input: { hint: "task" } },
     ]);
   });
 
-  it("keeps the advertised compact instead of seeding a duplicate", () => {
+  it("keeps the advertised compact and goal instead of seeding duplicates", () => {
     const commands = commandcodeSlashCommandsFromAvailableCommands([
+      command("goal", "Custom goal wording"),
       command("compact", "Custom compact wording"),
     ]);
-    expect(commands).toHaveLength(1);
+    expect(commands).toHaveLength(2);
     expect(commands[0]).toEqual({ name: "compact", description: "Custom compact wording" });
+    expect(commands[1]).toEqual({ name: "goal", description: "Custom goal wording" });
   });
 
   it("hides wrong-surface mod commands and skill names the $ menu already offers", () => {
@@ -46,10 +53,14 @@ describe("commandcodeSlashCommandsFromAvailableCommands", () => {
           command("grilling", "Grill the user"),
           command("tdd", "Test-driven development"),
           command("compact", "Compact"),
+          command("goal", "Goal"),
         ],
         skills,
       ),
-    ).toEqual([{ name: "compact", description: "Compact" }]);
+    ).toEqual([
+      { name: "compact", description: "Compact" },
+      { name: "goal", description: "Goal" },
+    ]);
   });
 
   it("drops blank and duplicate names", () => {
@@ -58,13 +69,18 @@ describe("commandcodeSlashCommandsFromAvailableCommands", () => {
       command("peek", "first"),
       command("peek", "second"),
     ]);
-    expect(commands.map((entry) => entry.name)).toEqual(["compact", "peek"]);
-    expect(commands[1]?.description).toEqual("first");
+    expect(commands.map((entry) => entry.name)).toEqual(["compact", "goal", "peek"]);
+    expect(commands[2]?.description).toEqual("first");
   });
 
-  it("is compact-only before the first session reports commands", () => {
+  it("is base-seeds-only before the first session reports commands", () => {
     expect(commandcodeSlashCommandsFromAvailableCommands([])).toEqual([
       { name: "compact", description: "Summarize the conversation and reduce context usage" },
+      {
+        name: "goal",
+        description: "Set a goal Command Code keeps working toward until it is done",
+        input: { hint: "Objective, or clear" },
+      },
     ]);
   });
 });
@@ -80,7 +96,14 @@ const machineSnapshot = (auth: ServerProvider["auth"]): ServerProvider => ({
   auth,
   checkedAt: "2026-01-01T00:00:00.000Z",
   models: [],
-  slashCommands: [{ name: "compact" }],
+  slashCommands: [
+    { name: "compact" },
+    {
+      name: "goal",
+      description: "Set a goal Command Code keeps working toward until it is done",
+      input: { hint: "Objective, or clear" },
+    },
+  ],
   skills: [],
 });
 
@@ -94,24 +117,24 @@ describe("mergeCommandcodeLiveCommands", () => {
       skills,
       liveCommands: live,
     });
-    expect(merged.slashCommands.map((entry) => entry.name)).toEqual(["compact", "peek"]);
+    expect(merged.slashCommands.map((entry) => entry.name)).toEqual(["compact", "goal", "peek"]);
     expect(merged.skills).toEqual(skills);
   });
 
-  it("stays compact-only when no session has reported and when signed out", () => {
+  it("stays base-seeds-only when no session has reported and when signed out", () => {
     const unauthenticated = mergeCommandcodeLiveCommands({
       machineSnapshot: machineSnapshot({ status: "unauthenticated" }),
       skills,
       liveCommands: live,
     });
-    expect(unauthenticated.slashCommands.map((entry) => entry.name)).toEqual(["compact"]);
+    expect(unauthenticated.slashCommands.map((entry) => entry.name)).toEqual(["compact", "goal"]);
 
     const pending = mergeCommandcodeLiveCommands({
       machineSnapshot: machineSnapshot({ status: "authenticated" }),
       skills,
       liveCommands: undefined,
     });
-    expect(pending.slashCommands.map((entry) => entry.name)).toEqual(["compact"]);
+    expect(pending.slashCommands.map((entry) => entry.name)).toEqual(["compact", "goal"]);
     expect(pending.skills).toEqual(skills);
   });
 

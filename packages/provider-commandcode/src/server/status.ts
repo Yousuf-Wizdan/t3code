@@ -3,7 +3,6 @@ import {
   type ServerProviderAuth,
   type ServerProviderModel,
   type ServerProviderSkill,
-  type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 import type { CommandcodeSettings } from "../settings.ts";
 import * as NodeOS from "node:os";
@@ -17,7 +16,7 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as ChildProcess from "effect/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import {
   COMMANDCODE_DRIVER_KIND,
@@ -27,7 +26,6 @@ import {
 import {
   AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
-  COMPACT_SLASH_COMMAND,
   isCommandMissingCause,
   nonEmptyTrimmed,
   parseGenericCliVersion,
@@ -37,13 +35,7 @@ import {
   spawnAndCollect,
 } from "@t3tools/provider-core/server/snapshotProbe";
 import { discoverCommandcodeSkills } from "./skills.ts";
-
-// Add goal command definition for Command Code.
-const GOAL_SLASH_COMMAND = {
-  name: "goal",
-  description: "Set a goal Command Code keeps working toward until it is done",
-  input: { hint: "Objective, or pause, resume, clear" },
-} as const satisfies ServerProviderSlashCommand;
+import { COMMANDCODE_BASE_SLASH_COMMANDS } from "./commands.ts";
 
 const COMMANDCODE_PRESENTATION = {
   displayName: "Command Code",
@@ -116,7 +108,9 @@ const decodeCatalogCacheFile = (raw: string): Option.Option<ReadonlyArray<Catalo
 
 /** Where the Command Code CLI keeps the catalog behind `/model`, per user home. */
 const commandcodeModelCatalogDir = (environment: NodeJS.ProcessEnv): string =>
-  `${environment.HOME ?? environment.USERPROFILE ?? NodeOS.homedir()}/.commandcode/cache/model-catalog/v1`;
+  `${
+    environment.HOME ?? environment.USERPROFILE ?? NodeOS.homedir()
+  }/.commandcode/cache/model-catalog/v1`;
 
 const CATALOG_FILE_PATTERN = /^catalog-.*\.json$/u;
 
@@ -242,8 +236,8 @@ const snapshot = (
       probe,
       // Live `available_commands_update` payloads (the only channel; the
       // initialize response carries none) merge per cwd in `snapshotForCwd`.
-      // Until the first session reports, the `/` menu offers compact only.
-      slashCommands: [COMPACT_SLASH_COMMAND, GOAL_SLASH_COMMAND],
+      // Until the first session reports, the `/` menu offers the base seeds.
+      slashCommands: [...COMMANDCODE_BASE_SLASH_COMMANDS],
       // User skills are known without a workspace, so the `$` menu works before
       // the first cwd scan too, mirroring Claude's machine snapshot.
       skills: [...skills],
@@ -391,7 +385,7 @@ export const checkCommandcodeProviderStatus = Effect.fn("checkCommandcodeProvide
         version: null,
         status: "error",
         auth: { status: "unknown" },
-        message: `Failed to run [1m${binary}[22m --version[22m${diagnosis ? `: ${diagnosis}` : "."}`,
+        message: `Failed to run \`${binary} --version\`${diagnosis ? `: ${diagnosis}` : "."}`,
       });
     }
     if (Option.isNone(versionResult.success)) {
@@ -400,7 +394,7 @@ export const checkCommandcodeProviderStatus = Effect.fn("checkCommandcodeProvide
         version: null,
         status: "error",
         auth: { status: "unknown" },
-        message: `Timed out running [1m${binary}[22m --version[22m after 10 s (cold start or AV scan?). Use Refresh provider status to retry.`,
+        message: `Timed out running \`${binary} --version\` after 10 s (cold start or AV scan?). Use Refresh provider status to retry.`,
       });
     }
     const versionOutput = versionResult.success.value.result;
@@ -438,11 +432,11 @@ export const checkCommandcodeProviderStatus = Effect.fn("checkCommandcodeProvide
     const auth = commandcodeAuth(decoded?.authenticated, decoded?.user);
     const probe =
       auth.status === "unauthenticated"
-        ? { status: "error" as const, message: `Run [1m${binary}[22m login[22m to sign in.` }
+        ? { status: "error" as const, message: `Run \`${binary} login\` to sign in.` }
         : auth.status === "unknown"
           ? {
               status: "warning" as const,
-              message: `Command Code is installed but login state could not be determined. Run [1m${binary}[22m status[22m to check.`,
+              message: `Command Code is installed but login state could not be determined. Run \`${binary} status\` to check.`,
             }
           : { status: "ready" as const };
     const defaultModel = nonEmptyTrimmed(decoded?.model ?? undefined);
