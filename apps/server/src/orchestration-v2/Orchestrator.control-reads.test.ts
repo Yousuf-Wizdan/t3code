@@ -769,6 +769,129 @@ it.effect("implements a proposed plan that the command projection leaves out", (
   }).pipe(Effect.provide(layerTest)),
 );
 
+const planModeInstanceId = ProviderInstanceId.make("commandcode");
+const planModeModelSelection = { instanceId: planModeInstanceId, model: "mimo-v2.6-pro" };
+const planModeAdapter = {
+  ...adapter,
+  instanceId: planModeInstanceId,
+  driver: ProviderDriverKind.make("commandcode"),
+} as ProviderAdapter.ProviderAdapterV2["Service"];
+const layerPlanMode = Layer.mergeAll(
+  layerDatabase,
+  ProjectionStore.layer.pipe(Layer.provide(layerDatabase)),
+  EffectOutbox.layer.pipe(Layer.provide(layerDatabase)),
+  ProviderReplayHarness.layerWithRegistry(
+    { name: "plan-mode" },
+    ProviderAdapterRegistry.layerFromAdapters([adapter, planModeAdapter]),
+    {
+      databaseLayer: layerDatabase,
+      runEffectWorker: false,
+      settingsOverrides: {
+        providerInstances: {
+          [planModeInstanceId]: {
+            driver: ProviderDriverKind.make("commandcode"),
+            enabled: true,
+          },
+        },
+      },
+    },
+  ),
+);
+
+it.effect("enters plan mode for a plan request and leaves it when implementing the plan", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const now = yield* DateTime.now;
+    const planThreadId = ThreadId.make("thread:plan-mode");
+    const planId = PlanId.make("plan:plan-mode");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-plan-mode"),
+      threadId: planThreadId,
+      projectId: ProjectId.make("project:plan-mode"),
+      title: "Plan mode",
+      modelSelection: planModeModelSelection,
+      runtimeMode: "auto-accept-edits",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("plan-request"),
+      threadId: planThreadId,
+      messageId: MessageId.make("plan-request-input"),
+      text: "lets plan a feature for the settings screen",
+      attachments: [],
+      dispatchMode: { type: "defer_start" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    assert.equal((yield* projections.getThread(planThreadId))?.interactionMode, "plan");
+
+    yield* projections.apply({
+      id: EventId.make("plan:plan-mode"),
+      type: "plan.updated",
+      threadId: planThreadId,
+      occurredAt: now,
+      payload: {
+        id: planId,
+        threadId: planThreadId,
+        runId: null,
+        nodeId: NodeId.make("node:plan-mode"),
+        kind: "proposed_plan",
+        status: "active",
+        markdown: "# Plan\n\n1. Do the thing.",
+      },
+    });
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("implement-plan-mode"),
+      threadId: planThreadId,
+      messageId: MessageId.make("implement-plan-mode-input"),
+      text: "Implement the plan.",
+      attachments: [],
+      sourcePlanRef: { threadId: planThreadId, planId },
+      dispatchMode: { type: "defer_start" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    assert.equal((yield* projections.getThread(planThreadId))?.interactionMode, "default");
+
+    // A plan request never flips threads whose provider does not run T3-driven plan mode.
+    const otherThreadId = ThreadId.make("thread:plan-mode-other");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-plan-mode-other"),
+      threadId: otherThreadId,
+      projectId: ProjectId.make("project:plan-mode"),
+      title: "Other provider",
+      modelSelection,
+      runtimeMode: "auto-accept-edits",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("plan-request-other"),
+      threadId: otherThreadId,
+      messageId: MessageId.make("plan-request-other-input"),
+      text: "lets plan a feature for the settings screen",
+      attachments: [],
+      dispatchMode: { type: "defer_start" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    assert.equal((yield* projections.getThread(otherThreadId))?.interactionMode, "default");
+  }).pipe(Effect.provide(layerPlanMode)),
+);
+
 it.effect("settles only the stopped run's background work, once", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;

@@ -35,7 +35,7 @@ import {
 
 const COMMANDCODE_PRESENTATION = {
   displayName: "Command Code",
-  showInteractionModeToggle: false,
+  showInteractionModeToggle: true,
   supportedRuntimeModes: COMMANDCODE_SUPPORTED_RUNTIME_MODES,
 } as const;
 const COMMANDCODE_MODEL_CAPABILITIES = createModelCapabilities({ optionDescriptors: [] });

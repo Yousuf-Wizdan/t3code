@@ -17,6 +17,8 @@ import {
   commandcodeSessionModeForPolicy,
   commandcodeTasteArgs,
   ensureCommandcodeTasteState,
+  extractCommandcodePlanMarkdownFromToolCallData,
+  isCommandcodePlanMarkdownPath,
   normalizeCommandcodeToolCall,
 } from "./acpSupport.ts";
 
@@ -142,6 +144,135 @@ describe("commandcodeBinaryPath", () => {
     assert.equal(commandcodeBinaryPath("cmdc", "darwin"), "cmdc");
     assert.equal(commandcodeBinaryPath("cmd", "win32"), "cmd");
     assert.equal(commandcodeBinaryPath("/opt/cmd", "win32"), "/opt/cmd");
+  });
+});
+
+const linuxHost = {
+  platform: "linux" as const,
+  environment: {},
+  homeDirectory: "/home/dev",
+};
+const windowsHost = {
+  platform: "win32" as const,
+  environment: { USERPROFILE: "C:\\Users\\dev" },
+  homeDirectory: "C:\\Users\\dev",
+};
+const planFile = "/home/dev/.commandcode/plans/feature-x.md";
+
+describe("isCommandcodePlanMarkdownPath", () => {
+  it("accepts live plan files under any known home and rejects everything else", () => {
+    assert.isTrue(isCommandcodePlanMarkdownPath(planFile, linuxHost));
+    assert.isTrue(isCommandcodePlanMarkdownPath("~/.commandcode/plans/feature-x.md", linuxHost));
+    assert.isTrue(
+      isCommandcodePlanMarkdownPath("/home/dev/.commandcode/plans/x.md", {
+        ...linuxHost,
+        environment: { HOME: "/home/dev" },
+      }),
+    );
+    assert.isTrue(isCommandcodePlanMarkdownPath("/home/other/.commandcode/plans/x.md", linuxHost));
+    assert.isTrue(
+      isCommandcodePlanMarkdownPath("C:\\Users\\other\\.commandcode\\plans\\X.md", windowsHost),
+    );
+    assert.isTrue(
+      isCommandcodePlanMarkdownPath("/opt/cmd-data/.commandcode/plans/x.md", {
+        ...linuxHost,
+        environment: { HOME: "/opt/cmd-data" },
+      }),
+    );
+
+    assert.isFalse(isCommandcodePlanMarkdownPath(undefined, linuxHost));
+    assert.isFalse(isCommandcodePlanMarkdownPath("", linuxHost));
+    assert.isFalse(
+      isCommandcodePlanMarkdownPath("/home/dev/.commandcode/plans/plans-index.json", linuxHost),
+    );
+    assert.isFalse(
+      isCommandcodePlanMarkdownPath("/home/dev/.commandcode/plans/versions/x-v1.md", linuxHost),
+    );
+    assert.isFalse(
+      isCommandcodePlanMarkdownPath("/home/dev/.commandcode/plans/nested/x.md", linuxHost),
+    );
+    assert.isFalse(
+      isCommandcodePlanMarkdownPath(
+        "/home/dev/.commandcode/plans/../../project/plan.md",
+        linuxHost,
+      ),
+    );
+    assert.isFalse(isCommandcodePlanMarkdownPath("/work/notes.md", linuxHost));
+    assert.isFalse(isCommandcodePlanMarkdownPath("plan.md", linuxHost));
+    assert.isFalse(isCommandcodePlanMarkdownPath("/repo/docs/plan.md", linuxHost));
+    assert.isFalse(
+      isCommandcodePlanMarkdownPath("/opt/cmd-data/plans/x.md", {
+        ...linuxHost,
+        environment: { HOME: "/opt/cmd-data" },
+      }),
+    );
+  });
+});
+
+describe("extractCommandcodePlanMarkdownFromToolCallData", () => {
+  it("takes the plan from plan-file writes and the exit_plan_mode fallback", () => {
+    assert.equal(
+      extractCommandcodePlanMarkdownFromToolCallData(
+        { rawInput: { file_path: planFile, content: "# From rawInput\n\n- a\n" }, content: [] },
+        linuxHost,
+      ),
+      "# From rawInput\n\n- a",
+    );
+    assert.equal(
+      extractCommandcodePlanMarkdownFromToolCallData(
+        { rawInput: { file_path: planFile, new_string: "# From edit" }, content: [] },
+        linuxHost,
+      ),
+      "# From edit",
+    );
+    assert.equal(
+      extractCommandcodePlanMarkdownFromToolCallData(
+        {
+          rawInput: { file_path: "/work/notes.md", content: "x" },
+          content: [{ type: "diff", path: planFile, oldText: "", newText: "# From diff\n\n- b\n" }],
+        },
+        linuxHost,
+      ),
+      "# From diff\n\n- b",
+    );
+    assert.equal(
+      extractCommandcodePlanMarkdownFromToolCallData(
+        { rawInput: { plan: "# Fallback plan" }, content: [] },
+        linuxHost,
+      ),
+      "# Fallback plan",
+    );
+    // A plan file write takes precedence over the fallback argument.
+    assert.equal(
+      extractCommandcodePlanMarkdownFromToolCallData(
+        {
+          rawInput: { file_path: planFile, content: "# From file", plan: "# Fallback" },
+          content: [],
+        },
+        linuxHost,
+      ),
+      "# From file",
+    );
+  });
+
+  it("reports empty plan writes and ignores unrelated tool calls", () => {
+    assert.equal(
+      extractCommandcodePlanMarkdownFromToolCallData(
+        { rawInput: { file_path: planFile, content: "   " }, content: [] },
+        linuxHost,
+      ),
+      "",
+    );
+    assert.isUndefined(
+      extractCommandcodePlanMarkdownFromToolCallData(
+        { rawInput: { file_path: "/work/notes.md", content: "hello" }, content: [] },
+        linuxHost,
+      ),
+    );
+    assert.isUndefined(
+      extractCommandcodePlanMarkdownFromToolCallData({ rawInput: { command: "ls" } }, linuxHost),
+    );
+    assert.isUndefined(extractCommandcodePlanMarkdownFromToolCallData(undefined, linuxHost));
   });
 });
 

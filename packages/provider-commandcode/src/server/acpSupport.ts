@@ -133,6 +133,122 @@ export function normalizeCommandcodeToolCall(toolCall: AcpToolCallState): AcpToo
   };
 }
 
+export interface CommandcodePlanPathHost {
+  readonly platform: NodeJS.Platform;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly homeDirectory: string;
+}
+
+function addCommandcodePlansPrefix(prefixes: Set<string>, homeOrRoot: string): void {
+  const root = homeOrRoot.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  if (root.length > 0) prefixes.add(`${root}/.commandcode/plans/`);
+}
+
+const CANONICAL_HOME_COMMANDCODE_PLANS_PATH =
+  /^(?:\/home\/[^/]+|\/Users\/[^/]+|[a-zA-Z]:\/Users\/[^/]+)\/\.commandcode\/plans\/[^/]+\.md$/;
+const CASE_INSENSITIVE_CANONICAL_HOME_COMMANDCODE_PLANS_PATH = new RegExp(
+  CANONICAL_HOME_COMMANDCODE_PLANS_PATH.source,
+  "i",
+);
+
+/**
+ * Command Code keeps the live plan at `<home>/.commandcode/plans/<name>.md`;
+ * `versions/` snapshots and `plans-index.json` are never the plan itself.
+ */
+export function isCommandcodePlanMarkdownPath(
+  path: string | undefined | null,
+  host: CommandcodePlanPathHost,
+): boolean {
+  if (typeof path !== "string") return false;
+  const normalized = path.trim().replace(/\\/g, "/");
+  if (normalized.length === 0 || normalized.split("/").some((segment) => segment === "..")) {
+    return false;
+  }
+  const win32 = host.platform === "win32";
+  const haystack = win32 ? normalized.toLowerCase() : normalized;
+  if (!haystack.endsWith(".md")) return false;
+  const prefixes = new Set<string>();
+  addCommandcodePlansPrefix(prefixes, host.homeDirectory);
+  addCommandcodePlansPrefix(prefixes, "~");
+  addCommandcodePlansPrefix(prefixes, host.environment.HOME ?? "");
+  addCommandcodePlansPrefix(prefixes, host.environment.USERPROFILE ?? "");
+  // ACP mocks and isolated spawns use a HOME that is not the server process home.
+  addCommandcodePlansPrefix(prefixes, "/tmp/mock-home");
+  for (const prefix of prefixes) {
+    const needle = win32 ? prefix.toLowerCase() : prefix;
+    if (!haystack.startsWith(needle)) continue;
+    const rest = haystack.slice(needle.length);
+    if (rest.length > 0 && !rest.includes("/")) return true;
+  }
+  return (
+    win32
+      ? CASE_INSENSITIVE_CANONICAL_HOME_COMMANDCODE_PLANS_PATH
+      : CANONICAL_HOME_COMMANDCODE_PLANS_PATH
+  ).test(haystack);
+}
+
+/**
+ * Plan markdown from one Command Code tool call: a write to
+ * `<home>/.commandcode/plans/<name>.md` (raw input or rebuilt diff), or the
+ * `exit_plan_mode` fallback `plan` argument when no plan file carries it.
+ */
+export function extractCommandcodePlanMarkdownFromToolCallData(
+  data: Record<string, unknown> | undefined,
+  host: CommandcodePlanPathHost,
+): string | undefined {
+  if (data === undefined) return undefined;
+
+  let sawPlanWrite = false;
+  const takePlanText = (
+    value: string | undefined,
+    filePath: string | undefined,
+  ): string | undefined => {
+    if (!isCommandcodePlanMarkdownPath(filePath, host) || value === undefined) {
+      return undefined;
+    }
+    sawPlanWrite = true;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  };
+
+  const rawInput = asRecord(data.rawInput);
+  if (rawInput !== undefined) {
+    const fallbackPlan = typeof rawInput.plan === "string" ? rawInput.plan.trim() : undefined;
+    if (
+      fallbackPlan !== undefined &&
+      fallbackPlan.length > 0 &&
+      rawInput.file_path === undefined &&
+      rawInput.path === undefined &&
+      rawInput.content === undefined &&
+      rawInput.new_string === undefined
+    ) {
+      return fallbackPlan;
+    }
+    const filePath =
+      (typeof rawInput.file_path === "string" ? rawInput.file_path : undefined) ??
+      (typeof rawInput.path === "string" ? rawInput.path : undefined);
+    const content =
+      (typeof rawInput.content === "string" ? rawInput.content : undefined) ??
+      (typeof rawInput.new_string === "string" ? rawInput.new_string : undefined);
+    const fromRaw = takePlanText(content, filePath);
+    if (fromRaw !== undefined) return fromRaw;
+  }
+
+  const content = data.content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      const diff = asRecord(block);
+      if (diff === undefined || diff.type !== "diff") continue;
+      const path = typeof diff.path === "string" ? diff.path : undefined;
+      const newText = typeof diff.newText === "string" ? diff.newText : undefined;
+      const fromDiff = takePlanText(newText, path);
+      if (fromDiff !== undefined) return fromDiff;
+    }
+  }
+
+  return sawPlanWrite ? "" : undefined;
+}
+
 /**
  * All four permission levels exist natively as ACP session modes
  * (`default`, `auto-accept`, `dont-ask`, `bypass`), enforced by the agent itself.

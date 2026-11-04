@@ -10,6 +10,7 @@ import type * as Path from "effect/Path";
 import type * as Scope from "effect/Scope";
 import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type * as EffectAcpErrors from "effect-acp/errors";
+import * as NodeOS from "node:os";
 
 import type * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import type * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
@@ -18,6 +19,7 @@ import {
   COMMANDCODE_DRIVER_KIND,
   commandcodeRuntimeModeForSessionMode,
   commandcodeSessionModeForPolicy,
+  extractCommandcodePlanMarkdownFromToolCallData,
   makeCommandcodeAcpRuntime,
   normalizeCommandcodeToolCall,
 } from "./acpSupport.ts";
@@ -85,6 +87,12 @@ function makeCommandcodeAcpAdapterFlavor(options: CommandcodeAdapterV2Options): 
     sessionModeForPolicy: commandcodeSessionModeForPolicy,
     runtimeModeForSessionMode: commandcodeRuntimeModeForSessionMode,
     normalizeToolCall: normalizeCommandcodeToolCall,
+    extractProposedPlanMarkdown: (toolCall) =>
+      extractCommandcodePlanMarkdownFromToolCallData(toolCall.data, {
+        platform: options.platform,
+        environment: options.environment,
+        homeDirectory: NodeOS.homedir(),
+      }),
     makeRuntime:
       options.makeRuntime ??
       (({ runtimePolicy: _runtimePolicy, processEnvironment, ...input }) =>

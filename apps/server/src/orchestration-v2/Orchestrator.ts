@@ -191,6 +191,8 @@ import {
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
+import { COMMANDCODE_DRIVER_KIND } from "@t3tools/provider-commandcode/server";
+import { messageRequestsPlanMode } from "./planRequestIntent.ts";
 
 const isMessageQuestionAnswer = Schema.is(
   Schema.Union([TrimmedNonEmptyString, Schema.NonEmptyArray(TrimmedNonEmptyString)]),
@@ -13357,6 +13359,37 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 text: guestSend.text,
                 context: { version: 1 as const, records: [], guest: guestSend.guest },
               };
+        // Command Code's own enter_plan_mode call is unreliable across model
+        // lanes, so T3 drives its plan mode: a user plan request runs read-only
+        // in Plan mode, and implementing an approved plan leaves it again.
+        const requestedInteractionMode = ((): ProviderInteractionMode | undefined => {
+          if (dispatched.sourcePlanRef !== undefined) {
+            return thread.interactionMode === "plan" ? "default" : undefined;
+          }
+          return thread.interactionMode === "default" &&
+            dispatched.createdBy === "user" &&
+            messageRequestsPlanMode(dispatched.text)
+            ? "plan"
+            : undefined;
+        })();
+        if (requestedInteractionMode !== undefined) {
+          const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+          const instance = Object.hasOwn(settings.providerInstances, thread.providerInstanceId)
+            ? settings.providerInstances[thread.providerInstanceId]
+            : undefined;
+          if (instance?.driver === COMMANDCODE_DRIVER_KIND) {
+            yield* dispatchThreadMutation(
+              {
+                type: "thread.interaction-mode.set",
+                commandId: CommandId.make(`command:system:plan-mode:${dispatched.commandId}`),
+                threadId: dispatched.threadId,
+                interactionMode: requestedInteractionMode,
+              },
+              events,
+              effects,
+            );
+          }
+        }
         cancelUnsettledEffects = yield* dispatchMessage(dispatched, events, effects);
         yield* recordSubagentFollowup(dispatched, events).pipe(mapDispatchError(command));
         break;

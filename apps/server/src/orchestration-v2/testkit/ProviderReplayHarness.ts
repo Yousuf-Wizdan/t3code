@@ -281,6 +281,7 @@ export function layerWithRegistry<Error>(
     readonly recoverOnStartup?: boolean;
     readonly continueThreadsAfterServerUpdate?: boolean;
     readonly managedPolicy?: ManagedPolicyDocument;
+    readonly settingsOverrides?: Parameters<typeof ServerSettings.layerTest>[0];
   } = {},
 ): Layer.Layer<
   | Orchestrator.OrchestratorV2
@@ -315,6 +316,7 @@ export function layerWithRegistry<Error>(
           ...(options.continueThreadsAfterServerUpdate === undefined
             ? {}
             : { continueThreadsAfterServerUpdate: options.continueThreadsAfterServerUpdate }),
+          ...options.settingsOverrides,
         },
         policy.summary,
       ),
