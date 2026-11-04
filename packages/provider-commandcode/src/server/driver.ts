@@ -15,6 +15,7 @@ import {
   checkCommandcodeProviderStatus,
 } from "./status.ts";
 import { probeCommandcodeSkills } from "./skills.ts";
+import { mergeCommandcodeLiveCommands, readCommandcodeLiveCommands } from "./commands.ts";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import {
   defaultProviderContinuationIdentity,
@@ -218,7 +219,12 @@ export const CommandcodeDriver: ProviderDriver<
                     }),
                 ),
               ),
-            ]).pipe(Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills }))),
+              readCommandcodeLiveCommands(instanceId),
+            ]).pipe(
+              Effect.map(([machineSnapshot, skills, liveCommands]) =>
+                mergeCommandcodeLiveCommands({ machineSnapshot, skills, liveCommands }),
+              ),
+            ),
       orchestrationAdapter,
       textGeneration,
     } satisfies ProviderInstance;

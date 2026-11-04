@@ -274,7 +274,7 @@ Claude instances can also compact idle threads for you. See
 
 ## Goals
 
-With Codex and Claude, send `/goal` followed by what "done" means, for example
+With Codex, Claude, and Command Code, send `/goal` followed by what "done" means, for example
 `/goal all tests in packages/api pass`. The agent keeps working across turns
 until it judges the goal met. The thread shows **Goal** while it works, and a
 line at the end of the thread (above the composer on mobile) shows the goal and
@@ -283,6 +283,10 @@ its progress.
 - `/goal` alone shows the current goal. `/goal clear` removes it.
 - Codex also supports `/goal pause` and `/goal resume`. Stopping a Codex goal
   pauses it, and so does Codex ending its work without meeting the goal.
+- Command Code accepts `/goal` set/show/clear with Codex-style queue and stop
+  behavior, but like Claude it cannot pause or resume: `/goal pause` and
+  `/goal resume` are rejected — send `/goal clear` to remove the goal. The goal
+  banner is tracked by T3; the harness does not report goal completion itself.
 - Stopping Claude ends the current turn, but the goal stays set. Claude checks it
   again at the end of your next message.
 - Sending a new goal, or `/goal resume`, while the agent works stops the current

@@ -1089,10 +1089,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const { driver } = yield* providerAdapters
       .get(providerInstanceId)
       .pipe(mapDispatchError(command));
-    return driver === "codex" || driver === "claudeAgent" ? driver : undefined;
+    return driver === "codex" || driver === "claudeAgent" || driver === "commandcode"
+      ? driver
+      : undefined;
   });
 
-  /** Claude Code reads `/goal pause` and `/goal resume` as new goals named "pause" and "resume". */
+  /** Claude Code and Command Code read `/goal pause` and `/goal resume` as new goals named "pause" and "resume". */
   const ensureGoalCommandSupported = Effect.fn("Orchestrator.ensureGoalCommandSupported")(
     function* (
       command: OrchestrationV2ServerCommand,
@@ -1101,11 +1103,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     ) {
       const goalCommand = parseGoalCommand(message);
       if (goalCommand?.type !== "pause" && goalCommand?.type !== "resume") return;
-      if ((yield* goalDriverFor(command, providerInstanceId)) !== "claudeAgent") return;
+      const goalDriver = yield* goalDriverFor(command, providerInstanceId);
+      if (goalDriver !== "claudeAgent" && goalDriver !== "commandcode") return;
+      const whose = goalDriver === "commandcode" ? "Command Code" : "Claude";
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
-        cause: "Claude goals cannot be paused or resumed. Send /goal clear to remove the goal.",
+        cause: `${whose} goals cannot be paused or resumed. Send /goal clear to remove the goal.`,
       });
     },
   );
@@ -5752,7 +5756,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     ) {
       dispatchMode = { type: "queue_after_active" };
     }
-    // Codex and Claude own /goal; elsewhere it is ordinary text that cannot steer.
+    // Codex, Claude, and Command Code own /goal; elsewhere it is ordinary text that cannot steer.
     const parsedGoalCommand = parseGoalCommand(command);
     const goalCommand =
       parsedGoalCommand === null ||

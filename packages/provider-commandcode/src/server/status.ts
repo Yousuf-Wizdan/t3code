@@ -24,6 +24,7 @@ import {
 import {
   AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
+  COMPACT_SLASH_COMMAND,
   isCommandMissingCause,
   nonEmptyTrimmed,
   parseGenericCliVersion,
@@ -211,6 +212,10 @@ const snapshot = (
     checkedAt,
     models: commandcodeModels(settings, defaultModel, catalog),
     probe,
+    // Live `available_commands_update` payloads (the only channel; the
+    // initialize response carries none) merge per cwd in `snapshotForCwd`.
+    // Until the first session reports, the `/` menu offers compact only.
+    slashCommands: [COMPACT_SLASH_COMMAND],
   }),
   // Text generation runs `cmd -p --no-session`, which persists nothing on disk.
   supportsTextGeneration: true,

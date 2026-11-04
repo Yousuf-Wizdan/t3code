@@ -23,6 +23,7 @@ import {
   makeCommandcodeAcpRuntime,
   normalizeCommandcodeToolCall,
 } from "./acpSupport.ts";
+import { publishCommandcodeLiveCommands } from "./commands.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
@@ -87,6 +88,10 @@ function makeCommandcodeAcpAdapterFlavor(options: CommandcodeAdapterV2Options): 
     sessionModeForPolicy: commandcodeSessionModeForPolicy,
     runtimeModeForSessionMode: commandcodeRuntimeModeForSessionMode,
     normalizeToolCall: normalizeCommandcodeToolCall,
+    // The only command channel: `initialize` carries none, so the first
+    // session's `available_commands_update` seeds the `/` menu per instance.
+    onAvailableCommandsUpdate: (commands) =>
+      publishCommandcodeLiveCommands(options.instanceId, commands),
     extractProposedPlanMarkdown: (toolCall) =>
       extractCommandcodePlanMarkdownFromToolCallData(toolCall.data, {
         platform: options.platform,

@@ -50,6 +50,13 @@ const adapter = {
   planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
   openSession: () => Effect.die("No provider process needed for metadata controls"),
 } as ProviderAdapter.ProviderAdapterV2["Service"];
+const commandcodeInstanceId = ProviderInstanceId.make("commandcode");
+const commandcodeModelSelection = { instanceId: commandcodeInstanceId, model: "default" };
+const commandcodeAdapter = {
+  ...adapter,
+  instanceId: commandcodeInstanceId,
+  driver: ProviderDriverKind.make("commandcode"),
+} as ProviderAdapter.ProviderAdapterV2["Service"];
 const layerDatabase = SqlitePersistence.layerMemory;
 const layerTest = Layer.mergeAll(
   layerDatabase,
@@ -57,7 +64,7 @@ const layerTest = Layer.mergeAll(
   EffectOutbox.layer.pipe(Layer.provide(layerDatabase)),
   ProviderReplayHarness.layerWithRegistry(
     { name: "control-reads" },
-    ProviderAdapterRegistry.layerFromAdapters([adapter]),
+    ProviderAdapterRegistry.layerFromAdapters([adapter, commandcodeAdapter]),
     { databaseLayer: layerDatabase, runEffectWorker: false },
   ),
 );
@@ -1788,5 +1795,60 @@ it.effect("dispatch records the command outcome and its duration", () =>
 
     assert.strictEqual((yield* successes).count - successesBefore, 1);
     assert.strictEqual((yield* durations).count - durationsBefore, 1);
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("rejects /goal pause and resume on Command Code like Claude", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = ThreadId.make("thread:commandcode-goal-gating");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-commandcode-goal-gating"),
+      threadId,
+      projectId: ProjectId.make("project:commandcode-goal-gating"),
+      title: "Command Code goal gating",
+      modelSelection: commandcodeModelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const dispatchGoal = (id: string, text: string) =>
+      orchestrator
+        .dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make(id),
+          threadId,
+          messageId: MessageId.make(id),
+          text,
+          attachments: [],
+          dispatchMode: { type: "defer_start" },
+          createdBy: "user",
+          creationSource: "web",
+        })
+        .pipe(Effect.result);
+    // Pause and resume read as literal goals in the harness, so T3 rejects them.
+    for (const text of ["/goal pause", "/goal resume"]) {
+      const rejected = yield* dispatchGoal(`commandcode-goal-reject:${text}`, text);
+      assert.isTrue(Result.isFailure(rejected));
+      assert.match(
+        String(
+          rejected._tag === "Failure" && rejected.failure._tag === "OrchestratorDispatchError"
+            ? rejected.failure.cause
+            : rejected,
+        ),
+        /Command Code goals cannot be paused or resumed/,
+      );
+    }
+    // Set steers instead of failing: it queues as goal work rather than dying
+    // at the dispatch gate (defer_start never opens a session in this harness).
+    const started = yield* dispatchGoal("commandcode-goal-set", "/goal all tests pass");
+    assert.isTrue(Result.isSuccess(started));
+    const projection = yield* projections.getThreadProjection(threadId);
+    assert.lengthOf(projection.runs, 1);
   }).pipe(Effect.provide(layerTest)),
 );
