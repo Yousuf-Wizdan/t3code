@@ -14,7 +14,7 @@ import {
   buildInitialCommandcodeProviderSnapshot,
   checkCommandcodeProviderStatus,
 } from "./status.ts";
-import { probeCommandcodeSkills } from "./skills.ts";
+import { discoverCommandcodeSkills } from "./skills.ts";
 import { mergeCommandcodeLiveCommands, readCommandcodeLiveCommands } from "./commands.ts";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import {
@@ -156,6 +156,7 @@ export const CommandcodeDriver: ProviderDriver<
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
       ),
     }).pipe(
       Effect.mapError(
@@ -206,18 +207,9 @@ export const CommandcodeDriver: ProviderDriver<
           ? snapshot.getSnapshot
           : Effect.all([
               snapshot.getSnapshot,
-              probeCommandcodeSkills(cwd, processEnv).pipe(
+              discoverCommandcodeSkills(cwd, processEnv).pipe(
                 Effect.provideService(FileSystem.FileSystem, fileSystem),
                 Effect.provideService(Path.Path, path),
-                Effect.mapError(
-                  (cause) =>
-                    new ProviderDriverError({
-                      driver: COMMANDCODE_DRIVER_KIND,
-                      instanceId,
-                      detail: `Failed to discover Command Code skills for '${cwd}'`,
-                      cause,
-                    }),
-                ),
               ),
               readCommandcodeLiveCommands(instanceId),
             ]).pipe(

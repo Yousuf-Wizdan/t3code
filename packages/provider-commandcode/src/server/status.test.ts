@@ -85,6 +85,10 @@ function processHandle(stdout: string, code: number, answered: Effect.Effect<voi
 /** Answers `cmdc` invocations by their arguments and records which ran. */
 const check = (statusJson: string, versionDelay: Duration.Input = 0, home = "") =>
   Effect.gen(function* () {
+    // An empty HOME would fall back to the machine's real home and read its
+    // skills, so point the probe at a missing home instead. A real temp dir
+    // would stall the virtual-clock timeout tests via scoped cleanup.
+    const isolatedHome = home ? home : "Z:\\t3-missing-home-for-tests";
     const outputs: Record<string, string> = {
       "--version": "1.88.2\n",
       "status --json": statusJson,
@@ -114,7 +118,11 @@ const check = (statusJson: string, versionDelay: Duration.Input = 0, home = "") 
     });
     // Miss PATH resolution by default so the harness exercises the same
     // shell:true fallback the packaged app takes before shell discovery.
-    const draft = yield* checkCommandcodeProviderStatus(settings, { HOME: home }, "win32").pipe(
+    const draft = yield* checkCommandcodeProviderStatus(
+      settings,
+      { HOME: isolatedHome },
+      "win32",
+    ).pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       Effect.provideService(SpawnExecutableResolution, () => undefined),
     );
@@ -179,6 +187,7 @@ describe("checkCommandcodeProviderStatus", () => {
       // "Default" names the model the session runs once a session reports it.
       assert.equal(signedIn.draft.models[0]?.name, "Default (xiaomi/mimo-v2.6-flash)");
       assert.equal(signedIn.draft.supportsTextGeneration, true);
+      assert.ok(Array.isArray(signedIn.draft.skills));
 
       const signedOut = yield* check(JSON.stringify({ authenticated: false, version: "1.88.2" }));
       assert.equal(signedOut.draft.status, "error");
@@ -332,6 +341,29 @@ describe("checkCommandcodeProviderStatus", () => {
       assert.deepEqual(
         descriptor?.type === "select" ? descriptor.options.map((option) => option.id) : [],
         ["default", "medium"],
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("seeds the machine snapshot with user skills so $ works before a cwd scan", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* makeHome();
+      const skillDir = path.join(home, ".commandcode", "skills", "review");
+      yield* fs.makeDirectory(skillDir, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(skillDir, "SKILL.md"),
+        "---\ndescription: review the changes\n---\n",
+      );
+      const { draft } = yield* check(
+        JSON.stringify({ authenticated: true, version: "1.88.2" }),
+        0,
+        home,
+      );
+      assert.deepEqual(
+        draft.skills.map((skill) => skill.name),
+        ["review"],
       );
     }).pipe(Effect.provide(NodeServices.layer)),
   );

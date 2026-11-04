@@ -2,6 +2,7 @@ import {
   type ProviderOptionDescriptor,
   type ServerProviderAuth,
   type ServerProviderModel,
+  type ServerProviderSkill,
 } from "@t3tools/contracts";
 import type { CommandcodeSettings } from "../settings.ts";
 import * as NodeOS from "node:os";
@@ -11,6 +12,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as ChildProcess from "effect/process/ChildProcess";
@@ -33,6 +35,7 @@ import {
   type ServerProviderDraft,
   spawnAndCollect,
 } from "@t3tools/provider-core/server/snapshotProbe";
+import { discoverCommandcodeSkills } from "./skills.ts";
 
 const COMMANDCODE_PRESENTATION = {
   displayName: "Command Code",
@@ -204,6 +207,7 @@ const snapshot = (
   probe: ProviderProbeResult,
   defaultModel?: string,
   catalog: ReadonlyArray<CatalogModelEntry> = [],
+  skills: ReadonlyArray<ServerProviderSkill> = [],
 ): ServerProviderDraft => ({
   ...buildServerProvider({
     driver: COMMANDCODE_DRIVER_KIND,
@@ -216,6 +220,9 @@ const snapshot = (
     // initialize response carries none) merge per cwd in `snapshotForCwd`.
     // Until the first session reports, the `/` menu offers compact only.
     slashCommands: [COMPACT_SLASH_COMMAND],
+    // User skills are known without a workspace, so the `$` menu works before
+    // the first cwd scan too, mirroring Claude's machine snapshot.
+    skills: [...skills],
   }),
   // Text generation runs `cmd -p --no-session`, which persists nothing on disk.
   supportsTextGeneration: true,
@@ -316,10 +323,11 @@ export const checkCommandcodeProviderStatus = Effect.fn("checkCommandcodeProvide
     settings: CommandcodeSettings,
     environment: NodeJS.ProcessEnv,
     platform: NodeJS.Platform,
+    cwd?: string,
   ): Effect.fn.Return<
     ServerProviderDraft,
     never,
-    ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
+    ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
   > {
     const checkedAt = DateTime.formatIso(yield* DateTime.now);
     if (!settings.enabled) {
@@ -412,12 +420,14 @@ export const checkCommandcodeProviderStatus = Effect.fn("checkCommandcodeProvide
           : { status: "ready" as const };
     const defaultModel = nonEmptyTrimmed(decoded?.model ?? undefined);
     const catalog = yield* commandcodeCatalogModels(commandcodeModelCatalogDir(environment));
+    const skills = yield* discoverCommandcodeSkills(cwd, environment);
     return snapshot(
       settings,
       checkedAt,
       { installed: true, version: decoded?.version ?? version, auth, ...probe },
       defaultModel,
       catalog,
+      skills,
     );
   },
 );
