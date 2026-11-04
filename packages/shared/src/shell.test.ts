@@ -721,9 +721,14 @@ describe("npmShimExecutable", () => {
 });
 
 effectIt.layer(NodeServices.layer)("resolveSpawnCommand", (it) => {
-  it.effect("runs Windows executables directly without a shell", () =>
+  it.effect("runs Windows executables with extensions directly without a shell", () =>
     Effect.gen(function* () {
-      const command = yield* resolveSpawnCommand("node.exe", ["script.js", "hello & goodbye"], {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const prefix = yield* fs.makeTempDirectoryScoped({ prefix: "t3-win-exe-" });
+      const executable = path.join(prefix, "node.exe");
+      yield* fs.writeFileString(executable, "");
+      const command = yield* resolveSpawnCommand(executable, ["script.js", "hello & goodbye"], {
         env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
       }).pipe(
         Effect.provideService(HostProcess.Platform, "win32"),
@@ -731,9 +736,28 @@ effectIt.layer(NodeServices.layer)("resolveSpawnCommand", (it) => {
       );
 
       expect(command).toEqual({
-        command: "node.exe",
+        command: executable,
         args: ["script.js", "hello & goodbye"],
         shell: false,
+        resolved: true,
+      });
+    }),
+  );
+
+  it.effect("does not resolve bare Windows commands against an empty PATH entry", () =>
+    Effect.gen(function* () {
+      const command = yield* resolveSpawnCommand("missing & calc", ["unsafe & value"], {
+        env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+      }).pipe(
+        Effect.provideService(HostProcess.Platform, "win32"),
+        Effect.provideService(CommandResolutionCache, new Map()),
+      );
+
+      expect(command).toEqual({
+        command: `^"missing^ ^&^ calc^" ^"unsafe^ ^&^ value^"`,
+        args: [],
+        shell: true,
+        resolved: false,
       });
     }),
   );
@@ -771,6 +795,7 @@ effectIt.layer(NodeServices.layer)("resolveSpawnCommand", (it) => {
             command: executable,
             args: ["serve", "--port=4096"],
             shell: false,
+            resolved: true,
           });
           expect((yield* resolve(false)).shell).toBe(true);
         }),
@@ -814,6 +839,25 @@ effectIt.layer(NodeServices.layer)("resolveSpawnCommand", (it) => {
         ].join(" "),
         args: [],
         shell: true,
+        resolved: true,
+      });
+    }),
+  );
+
+  it.effect("falls back to a shell lookup when a bare Windows command misses PATH", () =>
+    Effect.gen(function* () {
+      const command = yield* resolveSpawnCommand("cmdc", ["--version"], {
+        env: { PATH: "C:\\Windows\\System32", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+      }).pipe(
+        Effect.provideService(HostProcess.Platform, "win32"),
+        Effect.provideService(CommandResolutionCache, new Map()),
+      );
+
+      expect(command).toEqual({
+        command: '^"cmdc^" ^"--version^"',
+        args: [],
+        shell: true,
+        resolved: false,
       });
     }),
   );
@@ -916,9 +960,9 @@ effectIt.layer(NodeServices.layer)("resolveSpawnCommand", (it) => {
     );
   });
 
-  it.effect("does not fall back to a shell for unresolved Windows commands", () =>
+  it.effect("does not fall back to a shell for explicit Windows paths that miss", () =>
     Effect.gen(function* () {
-      const command = yield* resolveSpawnCommand("missing & calc", ["unsafe & value"], {
+      const command = yield* resolveSpawnCommand("C:\\tools\\missing", ["unsafe & value"], {
         env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
       }).pipe(
         Effect.provideService(HostProcess.Platform, "win32"),
@@ -926,9 +970,10 @@ effectIt.layer(NodeServices.layer)("resolveSpawnCommand", (it) => {
       );
 
       expect(command).toEqual({
-        command: "missing & calc",
+        command: "C:\\tools\\missing",
         args: ["unsafe & value"],
         shell: false,
+        resolved: true,
       });
     }),
   );

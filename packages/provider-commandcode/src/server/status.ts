@@ -238,14 +238,21 @@ const runCommandcodeCli = Effect.fn("runCommandcodeCli")(function* (
   platform: NodeJS.Platform,
 ) {
   const command = commandcodeBinaryPath(settings.binaryPath, platform);
+  const startedAt = yield* DateTime.now;
   const spawnCommand = yield* resolveSpawnCommand(command, args, { env: environment });
-  return yield* spawnAndCollect(
+  const result = yield* spawnAndCollect(
     command,
     ChildProcess.make(spawnCommand.command, spawnCommand.args, {
       env: environment,
       shell: spawnCommand.shell,
     }),
   );
+  const finishedAt = yield* DateTime.now;
+  return {
+    result,
+    resolved: spawnCommand.resolved,
+    elapsedMs: DateTime.toEpochMillis(finishedAt) - DateTime.toEpochMillis(startedAt),
+  };
 });
 
 /** `cmdc status --json`: `authenticated` plus the signed-in user and running version. */
@@ -261,6 +268,29 @@ type CommandcodeStatus = typeof CommandcodeStatusSchema.Type;
 const decodeCommandcodeStatus = Schema.decodeUnknownOption(CommandcodeStatusSchema);
 
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
+
+const probeFailureDetail = (
+  failure: unknown,
+  stderrTail: string | undefined,
+): string | undefined => {
+  const description =
+    typeof failure === "string" && failure.trim().length > 0
+      ? failure.trim().replace(/\s+/gu, " ")
+      : failure != null &&
+          typeof failure === "object" &&
+          "message" in failure &&
+          typeof (failure as { readonly message: unknown }).message === "string" &&
+          (failure as { readonly message: string }).message.trim().length > 0
+        ? (failure as { readonly message: string }).message.trim().replace(/\s+/gu, " ")
+        : "spawn failed";
+  const tail = stderrTail !== undefined && stderrTail.length > 0 ? ` - ${stderrTail}` : "";
+  return `${description}${tail}`;
+};
+
+const truncateTail = (output: string, maxLength = 200): string => {
+  const trimmed = output.trim().replace(/\s+/gu, " ");
+  return trimmed.length > maxLength ? `…${trimmed.slice(-maxLength)}` : trimmed;
+};
 
 function commandcodeAuth(
   authenticated: boolean | undefined,
@@ -304,28 +334,48 @@ export const checkCommandcodeProviderStatus = Effect.fn("checkCommandcodeProvide
       environment,
       platform,
     ).pipe(Effect.timeoutOption(VERSION_PROBE_TIMEOUT_MS), Effect.result);
-    if (Result.isFailure(versionResult) || Option.isNone(versionResult.success)) {
-      const missing =
-        Result.isFailure(versionResult) && isCommandMissingCause(versionResult.failure);
+    if (Result.isFailure(versionResult)) {
+      if (isCommandMissingCause(versionResult.failure)) {
+        return snapshot(settings, checkedAt, {
+          installed: false,
+          version: null,
+          status: "error",
+          auth: { status: "unknown" },
+          message:
+            "Command Code is not installed or not on PATH. Install it with `npm i -g command-code`.",
+        });
+      }
+      const diagnosis = probeFailureDetail(versionResult.failure, undefined);
       return snapshot(settings, checkedAt, {
-        installed: !missing,
+        installed: true,
         version: null,
         status: "error",
         auth: { status: "unknown" },
-        message: missing
-          ? "Command Code is not installed or not on PATH. Install it with `npm i -g command-code`."
-          : `Failed to run \`${binary} --version\`.`,
+        message: `Failed to run \`${binary} --version\`${diagnosis ? `: ${diagnosis}` : "."}`,
       });
     }
-    const versionOutput = versionResult.success.value;
+    if (Option.isNone(versionResult.success)) {
+      return snapshot(settings, checkedAt, {
+        installed: true,
+        version: null,
+        status: "error",
+        auth: { status: "unknown" },
+        message: `Timed out running \`${binary} --version\` after 10 s (cold start or AV scan?). Use Refresh provider status to retry.`,
+      });
+    }
+    const versionOutput = versionResult.success.value.result;
     const version = parseGenericCliVersion(`${versionOutput.stdout}\n${versionOutput.stderr}`);
     if (versionOutput.code !== 0) {
+      const detail = truncateTail(`${versionOutput.stdout}\n${versionOutput.stderr}`);
       return snapshot(settings, checkedAt, {
         installed: true,
         version,
         status: "error",
         auth: { status: "unknown" },
-        message: "Command Code is installed but failed to run.",
+        message:
+          detail.length > 0
+            ? `Command Code is installed but failed to run: ${detail}`
+            : "Command Code is installed but failed to run.",
       });
     }
 
@@ -335,11 +385,14 @@ export const checkCommandcodeProviderStatus = Effect.fn("checkCommandcodeProvide
       environment,
       platform,
     ).pipe(Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS), Effect.result);
+    const versionProbe = Result.isFailure(statusOutput)
+      ? undefined
+      : Option.getOrUndefined(statusOutput.success)?.result;
     const status =
-      Result.isFailure(statusOutput) || Option.isNone(statusOutput.success)
+      versionProbe === undefined
         ? Option.none<CommandcodeStatus>()
-        : statusOutput.success.value.code === 0
-          ? decodeCommandcodeStatus(statusOutput.success.value.stdout)
+        : versionProbe.code === 0
+          ? decodeCommandcodeStatus(versionProbe.stdout)
           : Option.none();
     const decoded = Option.getOrUndefined(status);
     const auth = commandcodeAuth(decoded?.authenticated, decoded?.user);
@@ -349,8 +402,7 @@ export const checkCommandcodeProviderStatus = Effect.fn("checkCommandcodeProvide
         : auth.status === "unknown"
           ? {
               status: "warning" as const,
-              message:
-                "Command Code is installed but login state could not be determined. Run `cmd status` to check.",
+              message: `Command Code is installed but login state could not be determined. Run \`${binary} status\` to check.`,
             }
           : { status: "ready" as const };
     const defaultModel = nonEmptyTrimmed(decoded?.model ?? undefined);

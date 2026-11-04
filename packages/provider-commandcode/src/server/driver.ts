@@ -141,7 +141,16 @@ export const CommandcodeDriver: ProviderDriver<
       haveSettingsChanged: haveProviderSnapshotSettingsChanged,
       initialSnapshot: (settings) =>
         buildInitialCommandcodeProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
-      checkProvider: checkCommandcodeProviderStatus(effectiveConfig, processEnv, platform).pipe(
+      checkProvider: Effect.gen(function* () {
+        // Re-merge against the live host env on every probe: the packaged app
+        // hydrates process.env after desktop shell discovery lands, and a
+        // snapshot taken at driver creation would keep the pre-discovery PATH.
+        const liveEnv = yield* mergeProviderInstanceEnvironment(
+          environment,
+          yield* HostProcess.Environment,
+        );
+        return yield* checkCommandcodeProviderStatus(effectiveConfig, liveEnv, platform);
+      }).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),

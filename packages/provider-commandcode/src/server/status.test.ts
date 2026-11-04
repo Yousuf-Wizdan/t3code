@@ -13,6 +13,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as TestClock from "effect/testing/TestClock";
 
 import { CommandcodeSettings } from "../settings.ts";
+import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 import { checkCommandcodeProviderStatus } from "./status.ts";
 
 const encoder = new TextEncoder();
@@ -89,8 +90,18 @@ const check = (statusJson: string, versionDelay: Duration.Input = 0, home = "") 
       "status --json": statusJson,
     };
     const invoked: Array<string> = [];
+    // A win32 miss falls back to a shell:true escaped command line with empty
+    // args; decode the probe from whichever shape the harness receives.
+    const probeKey = (command: ChildProcess.Command): string => {
+      if (!ChildProcess.isStandardCommand(command)) return "";
+      if (command.args.length > 0) return command.args.join(" ");
+      if (typeof command.command === "string" && command.command.includes("status")) {
+        return "status --json";
+      }
+      return "--version";
+    };
     const spawner = ChildProcessSpawner.make((command) => {
-      const args = ChildProcess.isStandardCommand(command) ? command.args.join(" ") : "";
+      const args = probeKey(command);
       invoked.push(args);
       const stdout = outputs[args];
       return Effect.succeed(
@@ -101,8 +112,11 @@ const check = (statusJson: string, versionDelay: Duration.Input = 0, home = "") 
         ),
       );
     });
+    // Miss PATH resolution by default so the harness exercises the same
+    // shell:true fallback the packaged app takes before shell discovery.
     const draft = yield* checkCommandcodeProviderStatus(settings, { HOME: home }, "win32").pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(SpawnExecutableResolution, () => undefined),
     );
     return { draft, invoked };
   }).pipe(Effect.provide(NodeServices.layer));
@@ -121,7 +135,8 @@ describe("checkCommandcodeProviderStatus", () => {
       versionDelay: "Infinity",
       status: "error",
       version: null,
-      message: "Failed to run `cmdc --version`.",
+      message:
+        "Timed out running `cmdc --version` after 10 s (cold start or AV scan?). Use Refresh provider status to retry.",
     },
   ] as const)("gives `cmdc --version` 10 s when it $label", (row) =>
     Effect.gen(function* () {
@@ -175,6 +190,23 @@ describe("checkCommandcodeProviderStatus", () => {
       assert.equal(unknown.draft.status, "warning");
       assert.equal(unknown.draft.auth.status, "unknown");
     }),
+  );
+
+  it.effect("names the spawn failure instead of blaming PATH when the version probe errors", () =>
+    Effect.gen(function* () {
+      const spawner = ChildProcessSpawner.make(
+        // The generic spawner handle returns PlatformError; fail with the raw
+        // message the probe surfaces so the detail branch is covered.
+        () => Effect.fail("spawn ENOENT: cmdc") as never,
+      );
+      const draft = yield* checkCommandcodeProviderStatus(settings, { HOME: "" }, "win32").pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(SpawnExecutableResolution, () => undefined),
+      );
+      assert.equal(draft.status, "error");
+      assert.isTrue(draft.installed);
+      assert.match(draft.message ?? "", /Failed to run `cmdc --version`: spawn ENOENT: cmdc/);
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("reports a disabled instance without spawning", () =>

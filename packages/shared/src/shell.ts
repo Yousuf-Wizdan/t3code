@@ -68,6 +68,9 @@ export interface ResolvedSpawnCommand {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly shell: boolean;
+  // False when win32 PATH resolution found nothing and the bare name is
+  // passed through for cmd.exe to resolve (PATHEXT lookup in the child).
+  readonly resolved: boolean;
 }
 
 export type SpawnExecutableResolver = (
@@ -835,7 +838,7 @@ export const resolveSpawnCommand = Effect.fnUntraced(function* (
   const platform = yield* HostProcess.Platform;
   const isMacosGit = platform === "darwin" && command === "git";
   if (platform !== "win32" && !isMacosGit) {
-    return { command, args: [...args], shell: false };
+    return { command, args: [...args], shell: false, resolved: true };
   }
 
   const hostEnvironment = yield* HostProcess.Environment;
@@ -851,6 +854,7 @@ export const resolveSpawnCommand = Effect.fnUntraced(function* (
       command: yield* resolveMacosGit(env, resolveExecutable),
       args: [...args],
       shell: false,
+      resolved: true,
     };
   }
   // The scan is synchronous and runs before every child process, so it shares
@@ -882,12 +886,20 @@ export const resolveSpawnCommand = Effect.fnUntraced(function* (
   }
   const resolvedCommand = resolvedExecutable ?? command;
   const extension = NodePath.win32.extname(resolvedCommand).toLowerCase();
+  if (resolvedExecutable === null && !explicitPath) {
+    return {
+      command: [command, ...args].map(escapeWindowsShellArg).join(" "),
+      args: [],
+      shell: true,
+      resolved: false,
+    };
+  }
   if (extension !== ".cmd" && extension !== ".bat") {
-    return { command: resolvedCommand, args: [...args], shell: false };
+    return { command: resolvedCommand, args: [...args], shell: false, resolved: true };
   }
   const shimExecutable = options.bypassNpmShim ? npmShimExecutable(resolvedCommand) : undefined;
   if (shimExecutable !== undefined) {
-    return { command: shimExecutable, args: [...args], shell: false };
+    return { command: shimExecutable, args: [...args], shell: false, resolved: true };
   }
 
   // Build the escaped command line without separate args to avoid Node DEP0190 with shell:true.
@@ -895,6 +907,7 @@ export const resolveSpawnCommand = Effect.fnUntraced(function* (
     command: [resolvedCommand, ...args].map(escapeWindowsShellArg).join(" "),
     args: [],
     shell: true,
+    resolved: true,
   };
 });
 
