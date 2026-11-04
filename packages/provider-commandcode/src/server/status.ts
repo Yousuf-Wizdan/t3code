@@ -182,6 +182,10 @@ const commandcodeModels = (
     seen.add(model.slug);
     return [model];
   });
+  const defaultCapabilities =
+    currentEfforts === undefined
+      ? { ...COMMANDCODE_MODEL_CAPABILITIES }
+      : commandcodeCapabilitiesForEfforts(currentEfforts);
   return providerModelsFromSettings(
     [
       {
@@ -189,10 +193,7 @@ const commandcodeModels = (
         name: defaultModel === undefined ? "Default" : `Default (${defaultModel})`,
         isCustom: false,
         isDefault: true,
-        capabilities:
-          currentEfforts === undefined
-            ? COMMANDCODE_MODEL_CAPABILITIES
-            : commandcodeCapabilitiesForEfforts(currentEfforts),
+        capabilities: defaultCapabilities,
       },
       ...catalogModels,
     ],
@@ -208,14 +209,31 @@ const snapshot = (
   defaultModel?: string,
   catalog: ReadonlyArray<CatalogModelEntry> = [],
   skills: ReadonlyArray<ServerProviderSkill> = [],
-): ServerProviderDraft => ({
-  ...buildServerProvider({
-    driver: COMMANDCODE_DRIVER_KIND,
-    presentation: COMMANDCODE_PRESENTATION,
-    enabled: settings.enabled,
-    checkedAt,
-    models: commandcodeModels(settings, defaultModel, catalog),
-    probe,
+  contextWindow: number | undefined = undefined,
+): ServerProviderDraft => {
+  const models = commandcodeModels(settings, defaultModel, catalog);
+  const updatedModels =
+    contextWindow !== undefined && models.length > 0
+      ? models.map((m) =>
+          m.slug === "default"
+            ? {
+                ...m,
+                capabilities: {
+                  ...(m.capabilities ?? { optionDescriptors: [] }),
+                  _meta: { totalContextTokens: contextWindow },
+                },
+              }
+            : m,
+        )
+      : models;
+  return {
+    ...buildServerProvider({
+      driver: COMMANDCODE_DRIVER_KIND,
+      presentation: COMMANDCODE_PRESENTATION,
+      enabled: settings.enabled,
+      checkedAt,
+      models: updatedModels,
+      probe,
     // Live `available_commands_update` payloads (the only channel; the
     // initialize response carries none) merge per cwd in `snapshotForCwd`.
     // Until the first session reports, the `/` menu offers compact only.
@@ -223,10 +241,11 @@ const snapshot = (
     // User skills are known without a workspace, so the `$` menu works before
     // the first cwd scan too, mirroring Claude's machine snapshot.
     skills: [...skills],
-  }),
-  // Text generation runs `cmd -p --no-session`, which persists nothing on disk.
-  supportsTextGeneration: true,
-});
+    }),
+    // Text generation runs `cmd -p --no-session`, which persists nothing on disk.
+    supportsTextGeneration: true,
+  };
+};
 
 export const buildInitialCommandcodeProviderSnapshot = (
   settings: CommandcodeSettings,
@@ -274,6 +293,8 @@ const CommandcodeStatusSchema = Schema.fromJsonString(
     version: Schema.optional(Schema.String),
     user: Schema.optional(Schema.String),
     model: Schema.optional(Schema.String),
+    context_window: Schema.optional(Schema.Number),
+    provider: Schema.optional(Schema.String),
   }),
 );
 type CommandcodeStatus = typeof CommandcodeStatusSchema.Type;
@@ -428,6 +449,7 @@ export const checkCommandcodeProviderStatus = Effect.fn("checkCommandcodeProvide
       defaultModel,
       catalog,
       skills,
+      decoded?.context_window,
     );
   },
 );

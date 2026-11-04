@@ -14,12 +14,14 @@ import * as NodeOS from "node:os";
 
 import type * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import type * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import { sessionModelStateFromInitialize } from "@t3tools/provider-acp/server/runtimeModel";
 import { makeAcpNativeLoggerFactory } from "@t3tools/provider-acp/server/nativeLogging";
 import {
   COMMANDCODE_DRIVER_KIND,
   commandcodeRuntimeModeForSessionMode,
   commandcodeSessionModeForPolicy,
   extractCommandcodePlanMarkdownFromToolCallData,
+  extractCommandcodeSubagentUpdate,
   makeCommandcodeAcpRuntime,
   normalizeCommandcodeToolCall,
 } from "./acpSupport.ts";
@@ -51,6 +53,16 @@ const CommandcodeProviderCapabilitiesV2 = {
   sessions: {
     ...AcpProviderCapabilitiesV2.sessions,
     supportsRuntimeModeSwitchInSession: true,
+  },
+  threads: {
+    ...AcpProviderCapabilitiesV2.threads,
+    canForkThread: true,
+    canForkFromTurn: false,
+  },
+  subagents: {
+    ...AcpProviderCapabilitiesV2.subagents,
+    supportsSubagents: true,
+    emitsSubagentLifecycle: true,
   },
 } satisfies OrchestrationV2ProviderCapabilities;
 
@@ -98,6 +110,21 @@ function makeCommandcodeAcpAdapterFlavor(options: CommandcodeAdapterV2Options): 
         environment: options.environment,
         homeDirectory: NodeOS.homedir(),
       }),
+    getModelContextWindow: (selection, session) => {
+      if (selection.instanceId !== options.instanceId) return undefined;
+      const models =
+        session.sessionSetupResult.models ??
+        sessionModelStateFromInitialize(session.initializeResult);
+      const window = models?.availableModels.find(
+        (model) => model.modelId === selection.model,
+      )?._meta?.totalContextTokens;
+      return typeof window === "number" && Number.isSafeInteger(window) && window > 0
+        ? window
+        : undefined;
+    },
+    supportsCompaction: true,
+    reportsPerTurnPromptUsage: true,
+    extractSubagentUpdate: extractCommandcodeSubagentUpdate,
     makeRuntime:
       options.makeRuntime ??
       (({ runtimePolicy: _runtimePolicy, processEnvironment, ...input }) =>

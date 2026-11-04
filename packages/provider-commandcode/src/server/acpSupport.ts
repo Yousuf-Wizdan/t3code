@@ -13,6 +13,7 @@ import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import type * as EffectAcpErrors from "effect-acp/errors";
 
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import type { AcpAdapterV2SubagentUpdate } from "@t3tools/provider-acp/server/adapter";
 import type { AcpToolCallState } from "@t3tools/provider-acp/server/runtimeModel";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -133,6 +134,41 @@ export function normalizeCommandcodeToolCall(toolCall: AcpToolCallState): AcpToo
   };
 }
 
+const CommandcodeSubagentRequest = Schema.Struct({
+  subagent_type: Schema.String,
+  prompt: Schema.String,
+  description: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+  run_in_background: Schema.optional(Schema.Boolean),
+});
+const decodeCommandcodeSubagentInput = Schema.decodeUnknownOption(CommandcodeSubagentRequest);
+const decodeCommandcodeToolText = Schema.decodeUnknownOption(
+  Schema.Array(Schema.Struct({ content: Schema.Struct({ text: Schema.String }) })),
+);
+
+/** Command Code runs subagents in-process; each `subagent` tool call becomes a child thread holding its prompt and reply. */
+export function extractCommandcodeSubagentUpdate(
+  tool: AcpToolCallState,
+): AcpAdapterV2SubagentUpdate | undefined {
+  if (tool.data.name !== "subagent") return undefined;
+  const input = decodeCommandcodeSubagentInput(tool.data.rawInput);
+  if (Option.isNone(input)) return undefined;
+  const request = input.value;
+  const text = Option.getOrUndefined(decodeCommandcodeToolText(tool.data.content))?.[0]?.content
+    .text;
+  const status =
+    tool.status === "completed" ? "completed" : tool.status === "failed" ? "failed" : "running";
+  return {
+    nativeTaskId: tool.toolCallId,
+    childSessionId: null,
+    prompt: request.prompt,
+    title: request.description ?? request.subagent_type,
+    model: request.model ?? null,
+    status,
+    result: status === "running" ? null : (text ?? null),
+  };
+}
+
 export interface CommandcodePlanPathHost {
   readonly platform: NodeJS.Platform;
   readonly environment: NodeJS.ProcessEnv;
@@ -250,7 +286,7 @@ export function extractCommandcodePlanMarkdownFromToolCallData(
 }
 
 /**
- * All four permission levels exist natively as ACP session modes
+  * All four permission levels exist natively as ACP session modes
  * (`default`, `auto-accept`, `dont-ask`, `bypass`), enforced by the agent itself.
  */
 export const COMMANDCODE_SUPPORTED_RUNTIME_MODES = [

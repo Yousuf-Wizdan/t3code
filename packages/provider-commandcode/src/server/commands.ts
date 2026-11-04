@@ -50,7 +50,10 @@ export function commandcodeSlashCommandsFromAvailableCommands(
 // The adapter flavor and the driver snapshot live in different objects with
 // no shared service between them, so the latest payload per instance waits
 // here until `snapshotForCwd` merges it on pull.
-const liveCommandsByInstance = new Map<string, ReadonlyArray<EffectAcpSchema.AvailableCommand>>();
+const liveCommandsByInstance = new Map<
+  string,
+  ReadonlyArray<EffectAcpSchema.AvailableCommand>
+>();
 
 export const publishCommandcodeLiveCommands = (
   instanceId: ProviderInstanceId,

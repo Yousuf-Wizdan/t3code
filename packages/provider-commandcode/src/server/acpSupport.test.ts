@@ -18,6 +18,7 @@ import {
   commandcodeTasteArgs,
   ensureCommandcodeTasteState,
   extractCommandcodePlanMarkdownFromToolCallData,
+  extractCommandcodeSubagentUpdate,
   isCommandcodePlanMarkdownPath,
   normalizeCommandcodeToolCall,
 } from "./acpSupport.ts";
@@ -133,6 +134,55 @@ describe("normalizeCommandcodeToolCall", () => {
       data: { rawInput: { other: 1 }, content: [] },
     };
     assert.strictEqual(normalizeCommandcodeToolCall(noPath), noPath);
+  });
+});
+
+describe("extractCommandcodeSubagentUpdate", () => {
+  it("maps a running subagent call to a child thread", () => {
+    const update = extractCommandcodeSubagentUpdate({
+      toolCallId: "call_9",
+      kind: "subagent",
+      title: "Subagent: explore",
+      status: "inProgress",
+      data: {
+        name: "subagent",
+        rawInput: { subagent_type: "explore", prompt: "Map the auth flow", description: "Explore auth" },
+        content: [],
+      },
+    });
+    assert.deepEqual(update, {
+      nativeTaskId: "call_9",
+      childSessionId: null,
+      prompt: "Map the auth flow",
+      title: "Explore auth",
+      model: null,
+      status: "running",
+      result: null,
+    });
+  });
+
+  it("returns the reply text on completion and ignores other tools", () => {
+    const done = extractCommandcodeSubagentUpdate({
+      toolCallId: "call_9",
+      kind: "subagent",
+      title: "Subagent: explore",
+      status: "completed",
+      data: {
+        name: "subagent",
+        rawInput: { subagent_type: "explore", prompt: "Map the auth flow" },
+        content: [{ content: { text: "Auth lives in session.ts" } }],
+      },
+    });
+    assert.equal(done?.status, "completed");
+    assert.equal(done?.result, "Auth lives in session.ts");
+    assert.equal(done?.title, "explore");
+    assert.isUndefined(
+      extractCommandcodeSubagentUpdate({
+        toolCallId: "call_2",
+        kind: "execute",
+        data: { rawInput: { command: "ls" }, content: [] },
+      }),
+    );
   });
 });
 

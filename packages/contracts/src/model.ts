@@ -101,6 +101,7 @@ function canonicalSelectionsToLegacyObject(
 
 export const ModelCapabilities = Schema.Struct({
   optionDescriptors: Schema.optional(Schema.Array(ProviderOptionDescriptor)),
+  _meta: Schema.optional(Schema.Struct({ totalContextTokens: Schema.Number })),
 });
 export type ModelCapabilities = typeof ModelCapabilities.Type;
 
