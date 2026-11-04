@@ -37,7 +37,7 @@ import {
 } from "@t3tools/provider-core/server/snapshotSettings";
 import { makeCommandcodeTextGeneration } from "./textGeneration.ts";
 import { commandcodeUsageReader } from "./usage.ts";
-import { COMMANDCODE_DRIVER_KIND } from "./acpSupport.ts";
+import { COMMANDCODE_DRIVER_KIND, commandcodeBinaryPath } from "./acpSupport.ts";
 
 const decodeCommandcodeSettings = Schema.decodeSync(CommandcodeSettings);
 
@@ -123,7 +123,7 @@ export const CommandcodeDriver: ProviderDriver<
     const effectiveConfig = { ...config, enabled } satisfies CommandcodeSettings;
     const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
       resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
-        binaryPath: effectiveConfig.binaryPath,
+        binaryPath: commandcodeBinaryPath(effectiveConfig.binaryPath, platform),
         env: processEnv,
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
