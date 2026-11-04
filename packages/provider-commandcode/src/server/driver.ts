@@ -14,6 +14,7 @@ import {
   buildInitialCommandcodeProviderSnapshot,
   checkCommandcodeProviderStatus,
 } from "./status.ts";
+import { probeCommandcodeSkills } from "./skills.ts";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import {
   defaultProviderContinuationIdentity,
@@ -199,6 +200,25 @@ export const CommandcodeDriver: ProviderDriver<
       accentColor,
       enabled,
       snapshot,
+      snapshotForCwd: (cwd) =>
+        !effectiveConfig.enabled
+          ? snapshot.getSnapshot
+          : Effect.all([
+              snapshot.getSnapshot,
+              probeCommandcodeSkills(cwd, processEnv).pipe(
+                Effect.provideService(FileSystem.FileSystem, fileSystem),
+                Effect.provideService(Path.Path, path),
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderDriverError({
+                      driver: COMMANDCODE_DRIVER_KIND,
+                      instanceId,
+                      detail: `Failed to discover Command Code skills for '${cwd}'`,
+                      cause,
+                    }),
+                ),
+              ),
+            ]).pipe(Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills }))),
       orchestrationAdapter,
       textGeneration,
     } satisfies ProviderInstance;
