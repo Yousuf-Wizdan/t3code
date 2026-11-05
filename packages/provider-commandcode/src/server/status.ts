@@ -74,6 +74,7 @@ const CatalogModelEntry = Schema.Struct({
   display: Schema.optional(Schema.Struct({ label: Schema.optional(Schema.String) })),
   aliases: Schema.optional(Schema.Array(Schema.String)),
   reasoningEfforts: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
+  context_window: Schema.optional(Schema.Number),
 });
 type CatalogModelEntry = typeof CatalogModelEntry.Type;
 
@@ -111,6 +112,7 @@ const commandcodeModelCatalogDir = (environment: NodeJS.ProcessEnv): string =>
   `${
     environment.HOME ?? environment.USERPROFILE ?? NodeOS.homedir()
   }/.commandcode/cache/model-catalog/v1`;
+// Note: "v1" is the CLI's cache directory name. If the CLI changes this, update here.
 
 const CATALOG_FILE_PATTERN = /^catalog-.*\.json$/u;
 
@@ -155,12 +157,26 @@ const commandcodeCatalogModel = (entry: CatalogModelEntry): ServerProviderModel 
   if (id === undefined || id === "default") return undefined;
   const label = nonEmptyTrimmed(entry.display?.label) ?? nonEmptyTrimmed(entry.name) ?? id;
   const aliases = (entry.aliases ?? []).flatMap((alias) => nonEmptyTrimmed(alias) ?? []);
+  const contextWindow =
+    typeof entry.context_window === "number" &&
+    Number.isSafeInteger(entry.context_window) &&
+    entry.context_window > 0
+      ? entry.context_window
+      : undefined;
   return {
     slug: id,
     name: label,
     ...(aliases.length > 0 ? { aliases } : {}),
     isCustom: false,
     capabilities: commandcodeCapabilitiesForEfforts(entry.reasoningEfforts),
+    ...(contextWindow !== undefined
+      ? {
+          capabilities: {
+            ...commandcodeCapabilitiesForEfforts(entry.reasoningEfforts),
+            _meta: { totalContextTokens: contextWindow },
+          },
+        }
+      : {}),
   };
 };
 

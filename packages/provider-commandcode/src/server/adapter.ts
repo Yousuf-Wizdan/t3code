@@ -24,6 +24,7 @@ import {
   extractCommandcodeSubagentUpdate,
   makeCommandcodeAcpRuntime,
   normalizeCommandcodeToolCall,
+  commandcodeModelSwitchHook,
 } from "./acpSupport.ts";
 import { publishCommandcodeLiveCommands } from "./commands.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
@@ -53,11 +54,17 @@ const CommandcodeProviderCapabilitiesV2 = {
   sessions: {
     ...AcpProviderCapabilitiesV2.sessions,
     supportsRuntimeModeSwitchInSession: true,
+    supportsModelSwitchInSession: true,
   },
   threads: {
     ...AcpProviderCapabilitiesV2.threads,
     canForkThread: true,
     canForkFromTurn: false,
+    canReadThreadSnapshot: true,
+  },
+  tools: {
+    ...AcpProviderCapabilitiesV2.tools,
+    supportsMcpTools: true,
   },
   subagents: {
     ...AcpProviderCapabilitiesV2.subagents,
@@ -99,6 +106,8 @@ function makeCommandcodeAcpAdapterFlavor(options: CommandcodeAdapterV2Options): 
     mcpOverHttp: true,
     sessionModeForPolicy: commandcodeSessionModeForPolicy,
     runtimeModeForSessionMode: commandcodeRuntimeModeForSessionMode,
+    applyModelSelection: ({ runtime, modelSelection }) =>
+      commandcodeModelSwitchHook(runtime, modelSelection),
     normalizeToolCall: normalizeCommandcodeToolCall,
     // The only command channel: `initialize` carries none, so the first
     // session's `available_commands_update` seeds the `/` menu per instance.
@@ -115,9 +124,8 @@ function makeCommandcodeAcpAdapterFlavor(options: CommandcodeAdapterV2Options): 
       const models =
         session.sessionSetupResult.models ??
         sessionModelStateFromInitialize(session.initializeResult);
-      const window = models?.availableModels.find(
-        (model) => model.modelId === selection.model,
-      )?._meta?.totalContextTokens;
+      const window = models?.availableModels.find((model) => model.modelId === selection.model)
+        ?._meta?.totalContextTokens;
       return typeof window === "number" && Number.isSafeInteger(window) && window > 0
         ? window
         : undefined;

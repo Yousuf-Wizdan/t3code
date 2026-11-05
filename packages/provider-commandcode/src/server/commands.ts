@@ -11,15 +11,6 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 import * as Effect from "effect/Effect";
 import { COMPACT_SLASH_COMMAND } from "@t3tools/provider-core/server/snapshotProbe";
 
-// Command Code parses `/goal` from the prompt, but the harness never
-// advertises it over ACP, so the menu seeds it. Pause/resume are rejected
-// server-side, hence the narrower hint.
-export const GOAL_SLASH_COMMAND = {
-  name: "goal",
-  description: "Set a goal Command Code keeps working toward until it is done",
-  input: { hint: "Objective, or clear" },
-} satisfies ServerProviderSlashCommand;
-
 // Wrong-surface mod commands: editor setup for other editors, not T3 threads.
 const HIDDEN_COMMANDCODE_COMMANDS = new Set(["acp"]);
 
@@ -32,7 +23,26 @@ export function commandcodeSkillNames(
 
 export const COMMANDCODE_BASE_SLASH_COMMANDS: ReadonlyArray<ServerProviderSlashCommand> = [
   COMPACT_SLASH_COMMAND,
-  GOAL_SLASH_COMMAND,
+  {
+    name: "goal",
+    description: "Set a goal Command Code keeps working toward until it is done",
+    input: { hint: "Objective, or clear" },
+  },
+  {
+    name: "plan",
+    description: "Enter or exit plan mode",
+    input: { hint: "Subcommand: enter, exit, status" },
+  },
+  {
+    name: "export",
+    description: "Export session: html, jsonl, md, or a file path",
+    input: { hint: "Format or output path" },
+  },
+  {
+    name: "share",
+    description: "Share session as a GitHub gist",
+    input: { hint: "gist [html|jsonl|md]" },
+  },
 ];
 
 export function commandcodeSlashCommandsFromAvailableCommands(
@@ -54,7 +64,7 @@ export function commandcodeSlashCommandsFromAvailableCommands(
     // later duplicates stay dropped. Map.set on an existing key preserves
     // insertion order, so the base order never shifts.
     if (byName.has(name)) {
-      if (name === COMPACT_SLASH_COMMAND.name || name === GOAL_SLASH_COMMAND.name) {
+      if (name === COMPACT_SLASH_COMMAND.name || name === "goal") {
         byName.set(name, {
           name,
           ...(description ? { description } : {}),
@@ -72,23 +82,38 @@ export function commandcodeSlashCommandsFromAvailableCommands(
   return [...byName.values()];
 }
 
-// The adapter flavor and the driver snapshot live in different objects with
-// no shared service between them, so the latest payload per instance waits
-// here until `snapshotForCwd` merges it on pull.
-const liveCommandsByInstance = new Map<string, ReadonlyArray<EffectAcpSchema.AvailableCommand>>();
+// Live commands map: generation counter prevents stale publishes from
+// overwriting newer ones; entries evicted on instance destruction.
+const liveCommandsByInstance = new Map<
+  string,
+  {
+    readonly commands: ReadonlyArray<EffectAcpSchema.AvailableCommand>;
+    readonly generation: number;
+  }
+>();
 
 export const publishCommandcodeLiveCommands = (
   instanceId: ProviderInstanceId,
   commands: ReadonlyArray<EffectAcpSchema.AvailableCommand>,
 ): Effect.Effect<void> =>
   Effect.sync(() => {
-    liveCommandsByInstance.set(String(instanceId), [...commands]);
+    const key = String(instanceId);
+    const current = liveCommandsByInstance.get(key);
+    liveCommandsByInstance.set(key, {
+      commands: [...commands],
+      generation: (current?.generation ?? 0) + 1,
+    });
   });
 
 export const readCommandcodeLiveCommands = (
   instanceId: ProviderInstanceId,
 ): Effect.Effect<ReadonlyArray<EffectAcpSchema.AvailableCommand> | undefined> =>
-  Effect.sync(() => liveCommandsByInstance.get(String(instanceId)));
+  Effect.sync(() => liveCommandsByInstance.get(String(instanceId))?.commands);
+
+export const clearCommandcodeLiveCommands = (instanceId: ProviderInstanceId): Effect.Effect<void> =>
+  Effect.sync(() => {
+    liveCommandsByInstance.delete(String(instanceId));
+  });
 
 /**
  * Merges the latest live payload into a cwd snapshot. Stale payloads from a

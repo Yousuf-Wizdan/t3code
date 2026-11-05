@@ -29,6 +29,21 @@ describe("commandcodeSlashCommandsFromAvailableCommands", () => {
         description: "Set a goal Command Code keeps working toward until it is done",
         input: { hint: "Objective, or clear" },
       },
+      {
+        name: "plan",
+        description: "Enter or exit plan mode",
+        input: { hint: "Subcommand: enter, exit, status" },
+      },
+      {
+        name: "export",
+        description: "Export session: html, jsonl, md, or a file path",
+        input: { hint: "Format or output path" },
+      },
+      {
+        name: "share",
+        description: "Share session as a GitHub gist",
+        input: { hint: "gist [html|jsonl|md]" },
+      },
       { name: "peek", description: "Peek at the session" },
       { name: "herdr", description: "Herd agents", input: { hint: "task" } },
     ]);
@@ -39,9 +54,24 @@ describe("commandcodeSlashCommandsFromAvailableCommands", () => {
       command("goal", "Custom goal wording"),
       command("compact", "Custom compact wording"),
     ]);
-    expect(commands).toHaveLength(2);
+    expect(commands).toHaveLength(5);
     expect(commands[0]).toEqual({ name: "compact", description: "Custom compact wording" });
     expect(commands[1]).toEqual({ name: "goal", description: "Custom goal wording" });
+    expect(commands[2]).toEqual({
+      name: "plan",
+      description: "Enter or exit plan mode",
+      input: { hint: "Subcommand: enter, exit, status" },
+    });
+    expect(commands[3]).toEqual({
+      name: "export",
+      description: "Export session: html, jsonl, md, or a file path",
+      input: { hint: "Format or output path" },
+    });
+    expect(commands[4]).toEqual({
+      name: "share",
+      description: "Share session as a GitHub gist",
+      input: { hint: "gist [html|jsonl|md]" },
+    });
   });
 
   it("hides wrong-surface mod commands and skill names the $ menu already offers", () => {
@@ -60,6 +90,21 @@ describe("commandcodeSlashCommandsFromAvailableCommands", () => {
     ).toEqual([
       { name: "compact", description: "Compact" },
       { name: "goal", description: "Goal" },
+      {
+        name: "plan",
+        description: "Enter or exit plan mode",
+        input: { hint: "Subcommand: enter, exit, status" },
+      },
+      {
+        name: "export",
+        description: "Export session: html, jsonl, md, or a file path",
+        input: { hint: "Format or output path" },
+      },
+      {
+        name: "share",
+        description: "Share session as a GitHub gist",
+        input: { hint: "gist [html|jsonl|md]" },
+      },
     ]);
   });
 
@@ -69,8 +114,15 @@ describe("commandcodeSlashCommandsFromAvailableCommands", () => {
       command("peek", "first"),
       command("peek", "second"),
     ]);
-    expect(commands.map((entry) => entry.name)).toEqual(["compact", "goal", "peek"]);
-    expect(commands[2]?.description).toEqual("first");
+    expect(commands.map((entry) => entry.name)).toEqual([
+      "compact",
+      "goal",
+      "plan",
+      "export",
+      "share",
+      "peek",
+    ]);
+    expect(commands[5]?.description).toEqual("first");
   });
 
   it("is base-seeds-only before the first session reports commands", () => {
@@ -80,6 +132,21 @@ describe("commandcodeSlashCommandsFromAvailableCommands", () => {
         name: "goal",
         description: "Set a goal Command Code keeps working toward until it is done",
         input: { hint: "Objective, or clear" },
+      },
+      {
+        name: "plan",
+        description: "Enter or exit plan mode",
+        input: { hint: "Subcommand: enter, exit, status" },
+      },
+      {
+        name: "export",
+        description: "Export session: html, jsonl, md, or a file path",
+        input: { hint: "Format or output path" },
+      },
+      {
+        name: "share",
+        description: "Share session as a GitHub gist",
+        input: { hint: "gist [html|jsonl|md]" },
       },
     ]);
   });
@@ -97,11 +164,26 @@ const machineSnapshot = (auth: ServerProvider["auth"]): ServerProvider => ({
   checkedAt: "2026-01-01T00:00:00.000Z",
   models: [],
   slashCommands: [
-    { name: "compact" },
+    { name: "compact", description: "Summarize the conversation and reduce context usage" },
     {
       name: "goal",
       description: "Set a goal Command Code keeps working toward until it is done",
       input: { hint: "Objective, or clear" },
+    },
+    {
+      name: "plan",
+      description: "Enter or exit plan mode",
+      input: { hint: "Subcommand: enter, exit, status" },
+    },
+    {
+      name: "export",
+      description: "Export session: html, jsonl, md, or a file path",
+      input: { hint: "Format or output path" },
+    },
+    {
+      name: "share",
+      description: "Share session as a GitHub gist",
+      input: { hint: "gist [html|jsonl|md]" },
     },
   ],
   skills: [],
@@ -117,7 +199,14 @@ describe("mergeCommandcodeLiveCommands", () => {
       skills,
       liveCommands: live,
     });
-    expect(merged.slashCommands.map((entry) => entry.name)).toEqual(["compact", "goal", "peek"]);
+    expect(merged.slashCommands.map((entry) => entry.name)).toEqual([
+      "compact",
+      "goal",
+      "plan",
+      "export",
+      "share",
+      "peek",
+    ]);
     expect(merged.skills).toEqual(skills);
   });
 
@@ -127,14 +216,26 @@ describe("mergeCommandcodeLiveCommands", () => {
       skills,
       liveCommands: live,
     });
-    expect(unauthenticated.slashCommands.map((entry) => entry.name)).toEqual(["compact", "goal"]);
+    expect(unauthenticated.slashCommands.map((entry) => entry.name)).toEqual([
+      "compact",
+      "goal",
+      "plan",
+      "export",
+      "share",
+    ]);
 
     const pending = mergeCommandcodeLiveCommands({
       machineSnapshot: machineSnapshot({ status: "authenticated" }),
       skills,
       liveCommands: undefined,
     });
-    expect(pending.slashCommands.map((entry) => entry.name)).toEqual(["compact", "goal"]);
+    expect(pending.slashCommands.map((entry) => entry.name)).toEqual([
+      "compact",
+      "goal",
+      "plan",
+      "export",
+      "share",
+    ]);
     expect(pending.skills).toEqual(skills);
   });
 

@@ -15,7 +15,11 @@ import {
   checkCommandcodeProviderStatus,
 } from "./status.ts";
 import { discoverCommandcodeSkills } from "./skills.ts";
-import { mergeCommandcodeLiveCommands, readCommandcodeLiveCommands } from "./commands.ts";
+import {
+  mergeCommandcodeLiveCommands,
+  readCommandcodeLiveCommands,
+  clearCommandcodeLiveCommands,
+} from "./commands.ts";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import {
   defaultProviderContinuationIdentity,
@@ -29,7 +33,6 @@ import {
   makeCachedProviderMaintenanceResolution,
   makeManualOnlyProviderMaintenanceCapabilities,
   makeProviderMaintenanceCapabilities,
-  type ProviderMaintenanceCapabilitiesResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "@t3tools/provider-core/server/maintenanceResolver";
 import {
@@ -46,33 +49,40 @@ const decodeCommandcodeSettings = Schema.decodeSync(CommandcodeSettings);
 const COMMANDCODE_NPM_PACKAGE = "command-code";
 // `cmd update` self-updates; a Homebrew cask owns its own upgrades, so there
 // `cmd update` would install a second copy instead of the cask's binary.
-const UPDATE: ProviderMaintenanceCapabilitiesResolver = {
-  resolve: Effect.fn("resolveCommandcodeMaintenance")(function* (context) {
-    if (!context) {
-      return makeManualOnlyProviderMaintenanceCapabilities({
-        provider: COMMANDCODE_DRIVER_KIND,
-        packageName: COMMANDCODE_NPM_PACKAGE,
-      });
-    }
-    const homebrew = homebrewOwnershipFromCommandPath(context.realCommandPath);
-    if (homebrew?.kind === "cask") {
-      return makeManualOnlyProviderMaintenanceCapabilities({
-        provider: COMMANDCODE_DRIVER_KIND,
-        packageName: COMMANDCODE_NPM_PACKAGE,
-        installPath: context.realCommandPath,
-      });
-    }
-    return makeProviderMaintenanceCapabilities({
-      provider: COMMANDCODE_DRIVER_KIND,
-      packageName: COMMANDCODE_NPM_PACKAGE,
-      updateExecutable: context.resolvedCommandPath,
-      updateArgs: ["update"],
-      updateLockKey: "commandcode",
-      platform: context.platform,
-      env: context.env,
-    });
-  }),
-};
+const UPDATE: import("@t3tools/provider-core/server/maintenanceResolver").ProviderMaintenanceCapabilitiesResolver =
+  {
+    resolve: Effect.fn("resolveCommandcodeMaintenance")(function* (context) {
+      if (!context) {
+        return yield* Effect.succeed(
+          makeManualOnlyProviderMaintenanceCapabilities({
+            provider: COMMANDCODE_DRIVER_KIND,
+            packageName: COMMANDCODE_NPM_PACKAGE,
+          }),
+        );
+      }
+      const homebrew = homebrewOwnershipFromCommandPath(context.realCommandPath);
+      if (homebrew?.kind === "cask") {
+        return yield* Effect.succeed(
+          makeManualOnlyProviderMaintenanceCapabilities({
+            provider: COMMANDCODE_DRIVER_KIND,
+            packageName: COMMANDCODE_NPM_PACKAGE,
+            installPath: context.realCommandPath,
+          }),
+        );
+      }
+      return yield* Effect.succeed(
+        makeProviderMaintenanceCapabilities({
+          provider: COMMANDCODE_DRIVER_KIND,
+          packageName: COMMANDCODE_NPM_PACKAGE,
+          updateExecutable: context.resolvedCommandPath,
+          updateArgs: ["update"],
+          updateLockKey: "commandcode",
+          platform: context.platform,
+          env: context.env,
+        }),
+      );
+    }),
+  };
 
 export type CommandcodeDriverEnv =
   | CommandcodeAdapterV2DriverEnv
@@ -217,6 +227,7 @@ export const CommandcodeDriver: ProviderDriver<
                 mergeCommandcodeLiveCommands({ machineSnapshot, skills, liveCommands }),
               ),
             ),
+      invalidateCaches: clearCommandcodeLiveCommands(instanceId),
       orchestrationAdapter,
       textGeneration,
     } satisfies ProviderInstance;

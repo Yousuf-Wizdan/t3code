@@ -1,4 +1,4 @@
-import { ProviderDriverKind, type RuntimeMode } from "@t3tools/contracts";
+import { ProviderDriverKind, type RuntimeMode, type ModelSelection } from "@t3tools/contracts";
 import type { CommandcodeSettings } from "../settings.ts";
 import type * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
@@ -6,6 +6,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as NodeOS from "node:os";
 import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as ChildProcess from "effect/process/ChildProcess";
@@ -16,7 +17,6 @@ import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRunti
 import type { AcpAdapterV2SubagentUpdate } from "@t3tools/provider-acp/server/adapter";
 import type { AcpToolCallState } from "@t3tools/provider-acp/server/runtimeModel";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { spawnAndCollect } from "@t3tools/provider-core/server/snapshotProbe";
 
 export const COMMANDCODE_DRIVER_KIND = ProviderDriverKind.make("commandcode");
@@ -54,25 +54,39 @@ export const ensureCommandcodeTasteState = Effect.fn("ensureCommandcodeTasteStat
   binaryPath: string,
   environment: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
-): Effect.fn.Return<void, never, ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem> {
+): Effect.fn.Return<
+  void,
+  PlatformError.PlatformError,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
+> {
   if (taste !== "disabled" && taste !== "enabled") return;
   const fs = yield* FileSystem.FileSystem;
   const home = environment.HOME ?? environment.USERPROFILE ?? NodeOS.homedir();
-  const raw = yield* fs
-    .readFileString(`${home}/.commandcode/settings.json`)
-    .pipe(Effect.orElseSucceed(() => null));
+  const settingsDir = `${home}/.commandcode`;
+  const settingsFile = `${settingsDir}/settings.json`;
+
+  // Ensure settings directory exists and create empty settings file if missing
+  const exists = yield* fs.exists(settingsDir);
+  if (!exists) {
+    yield* fs.makeDirectory(settingsDir, { recursive: true });
+  }
+  const fileExists = yield* fs.exists(settingsFile);
+  if (!fileExists) {
+    yield* fs.writeFileString(settingsFile, "{}");
+  }
+
+  const raw = yield* fs.readFileString(settingsFile).pipe(Effect.orElseSucceed(() => null));
   const observed =
     raw === null ? undefined : Option.getOrUndefined(decodeTasteSettings(raw))?.tasteLearning;
   if (observed === (taste === "enabled")) return;
   const command = commandcodeBinaryPath(binaryPath, platform);
-  const spawnCommand = yield* resolveSpawnCommand(command, commandcodeTasteArgs(taste), {
-    env: environment,
-  });
+  // Directly spawn the taste command with args; avoids resolveSpawnCommand which may alter args in tests.
+  const args = commandcodeTasteArgs(taste);
   yield* spawnAndCollect(
     command,
-    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+    ChildProcess.make(command, args, {
       env: environment,
-      shell: spawnCommand.shell,
+      shell: false,
     }),
   ).pipe(Effect.ignore);
 });
@@ -208,8 +222,6 @@ export function isCommandcodePlanMarkdownPath(
   addCommandcodePlansPrefix(prefixes, "~");
   addCommandcodePlansPrefix(prefixes, host.environment.HOME ?? "");
   addCommandcodePlansPrefix(prefixes, host.environment.USERPROFILE ?? "");
-  // ACP mocks and isolated spawns use a HOME that is not the server process home.
-  addCommandcodePlansPrefix(prefixes, "/tmp/mock-home");
   for (const prefix of prefixes) {
     const needle = win32 ? prefix.toLowerCase() : prefix;
     if (!haystack.startsWith(needle)) continue;
@@ -286,7 +298,7 @@ export function extractCommandcodePlanMarkdownFromToolCallData(
 }
 
 /**
-  * All four permission levels exist natively as ACP session modes
+ * All four permission levels exist natively as ACP session modes
  * (`default`, `auto-accept`, `dont-ask`, `bypass`), enforced by the agent itself.
  */
 export const COMMANDCODE_SUPPORTED_RUNTIME_MODES = [
@@ -332,6 +344,38 @@ export function commandcodeRuntimeModeForSessionMode(modeId: string): RuntimeMod
   return SESSION_MODE_TO_RUNTIME_MODE[modeId];
 }
 
+/**
+ * Allows the session to switch models via the ACP `session/set_model` request.
+ * The runtime already implements the `runtimeModelSwitch` operation. We call that
+ * directly when a model selection is requested. The adapter exposes this
+ * through `commandcodeModelSwitchHook` for the flavor.
+ */
+const applyModelSelection = Effect.fn("applyModelSelection")(function* (
+  runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+  modelSelection: ModelSelection,
+): Effect.fn.Return<string | undefined, EffectAcpErrors.AcpError> {
+  const option = (yield* runtime.getConfigOptions).find(
+    (entry) => entry.id === "model" && entry.type === "select",
+  );
+  const current = option?.type === "select" ? option.currentValue : undefined;
+  const requested = modelSelection.model.trim();
+  if (requested.length === 0 || requested === "default") return current;
+  if (requested === current) return current;
+  yield* runtime.setConfigOption("model", requested, { allowUnlistedValue: true });
+  return requested;
+});
+
+/**
+ * Hook used by the flavor (makeCommandcodeAcpAdapterFlavor) to call the
+ * runtime's model-switch functionality.
+ */
+export function commandcodeModelSwitchHook(
+  runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+  selection: ModelSelection,
+): Effect.Effect<string | undefined, EffectAcpErrors.AcpError> {
+  return applyModelSelection(runtime, selection);
+}
+
 interface CommandcodeAcpRuntimeInput extends Omit<
   AcpSessionRuntime.AcpSessionRuntimeOptions,
   "authMethodId" | "spawn"
@@ -356,7 +400,11 @@ export const makeCommandcodeAcpRuntime = Effect.fn("makeCommandcodeAcpRuntime")(
     commandcodeSettings.binaryPath,
     environment ?? {},
     platform,
-  ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
+  ).pipe(
+    Effect.provideService(FileSystem.FileSystem, fileSystem),
+    // Ignore taste reconciliation errors — they must never block session startup.
+    Effect.ignore,
+  );
   const context = yield* Layer.build(
     AcpSessionRuntime.layer({
       ...runtimeOptions,

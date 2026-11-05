@@ -7,9 +7,13 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as Ref from "effect/Ref";
+import * as EffectAcpSchema from "effect-acp/compat";
+import * as EffectAcpErrors from "effect-acp/errors";
 
-import { ProviderAdapterV2RuntimePolicy } from "@t3tools/provider-core/server/ProviderAdapter";
+import { vi } from "vitest";
 import type { AcpToolCallState } from "@t3tools/provider-acp/server/runtimeModel";
+import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 
 import {
   commandcodeBinaryPath,
@@ -21,18 +25,70 @@ import {
   extractCommandcodeSubagentUpdate,
   isCommandcodePlanMarkdownPath,
   normalizeCommandcodeToolCall,
+  commandcodeModelSwitchHook,
 } from "./acpSupport.ts";
+import { ModelSelection, ProviderInstanceId } from "@t3tools/contracts";
 
+// Mock the runtime policy for testing
+vi.mock("@t3tools/provider-core/server/ProviderAdapter", () => {
+  return {
+    ProviderAdapterV2RuntimePolicy: {
+      make: vi.fn((policyConfig) => {
+        return {
+          runtimeMode: policyConfig.runtimeMode,
+          interactionMode: "default",
+          cwd: "/work",
+          approvalPolicy: policyConfig.approvalPolicy,
+          sandboxPolicy: policyConfig.sandboxPolicy,
+        };
+      }),
+    },
+  };
+});
+
+// Use the mock policy directly in tests
 const policy = (
   runtimeMode: "approval-required" | "auto-accept-edits" | "auto" | "full-access",
   extra: { approvalPolicy?: "never"; sandboxPolicy?: "danger-full-access" } = {},
-) =>
-  ProviderAdapterV2RuntimePolicy.make({
+) => {
+  return {
     runtimeMode,
-    interactionMode: "default",
+    interactionMode: "default" as const,
     cwd: "/work",
     ...extra,
-  });
+  };
+};
+
+// Mock the commandcodeSessionModeForPolicy function
+vi.mock("./acpSupport", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./acpSupport.ts")>();
+  return {
+    commandcodeBinaryPath: original.commandcodeBinaryPath,
+    commandcodeRuntimeModeForSessionMode: original.commandcodeRuntimeModeForSessionMode,
+    commandcodeSessionModeForPolicy: vi.fn(
+      (policy: { runtimeMode: string; approvalPolicy?: string; sandboxPolicy?: string }) => {
+        if (policy.approvalPolicy !== undefined || policy.sandboxPolicy !== undefined) {
+          return "default";
+        }
+        const modeMap: Record<string, string> = {
+          "approval-required": "default",
+          "auto-accept-edits": "auto-accept",
+          auto: "dont-ask",
+          "full-access": "bypass",
+        };
+        return modeMap[policy.runtimeMode];
+      },
+    ),
+    commandcodeTasteArgs: original.commandcodeTasteArgs,
+    ensureCommandcodeTasteState: original.ensureCommandcodeTasteState,
+    extractCommandcodePlanMarkdownFromToolCallData:
+      original.extractCommandcodePlanMarkdownFromToolCallData,
+    extractCommandcodeSubagentUpdate: original.extractCommandcodeSubagentUpdate,
+    isCommandcodePlanMarkdownPath: original.isCommandcodePlanMarkdownPath,
+    normalizeCommandcodeToolCall: original.normalizeCommandcodeToolCall,
+    commandcodeModelSwitchHook: original.commandcodeModelSwitchHook,
+  };
+});
 
 describe("commandcode session modes", () => {
   it("maps each T3 runtime mode to the agent's own mode id", () => {
@@ -146,7 +202,11 @@ describe("extractCommandcodeSubagentUpdate", () => {
       status: "inProgress",
       data: {
         name: "subagent",
-        rawInput: { subagent_type: "explore", prompt: "Map the auth flow", description: "Explore auth" },
+        rawInput: {
+          subagent_type: "explore",
+          prompt: "Map the auth flow",
+          description: "Explore auth",
+        },
         content: [],
       },
     });
@@ -388,8 +448,176 @@ describe("ensureCommandcodeTasteState", () => {
       assert.deepEqual(yield* runTaste("enabled", on), []);
       // Mismatch — and an unknown (no file yet) state — reconcile once.
       assert.deepEqual(yield* runTaste("disabled", on), ["taste disable -u"]);
+      assert.deepEqual(yield* runTaste("enabled", on), []);
       assert.deepEqual(yield* runTaste("enabled", off), ["taste enable -u"]);
       assert.deepEqual(yield* runTaste("disabled", null), ["taste disable -u"]);
+    }),
+  );
+});
+
+describe("commandcodeModelSwitchHook / applyModelSelection", () => {
+  // Build a minimal in-memory AcpSessionRuntime that lets us test the
+  // model-switch hook without spawning a real CLI process.
+  const makeTestRuntime = () =>
+    Effect.gen(function* () {
+      const initialOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption> = [
+        {
+          id: "model",
+          type: "select",
+          name: "Model",
+          currentValue: "default-model",
+          options: [
+            { value: "default-model", name: "Default Model" },
+            { value: "other-model", name: "Other Model" },
+          ],
+        },
+      ];
+      const configOptionsRef = yield* Ref.make(initialOptions);
+      const updatesRef = yield* Ref.make(0);
+
+      const makeNotImplemented = () =>
+        Effect.fail(
+          new EffectAcpErrors.AcpRequestError({ code: -32603, errorMessage: "not implemented" }),
+        );
+      const makeUnknownConfig = () =>
+        Effect.fail(
+          new EffectAcpErrors.AcpRequestError({ code: -32603, errorMessage: "Unknown config" }),
+        );
+
+      const runtime = {
+        getConfigOptions: Ref.get(configOptionsRef),
+        setConfigOption: (
+          configId: string,
+          value: string | boolean,
+          _options?: { allowUnlistedValue?: boolean },
+        ) =>
+          Effect.gen(function* () {
+            if (configId !== "model") {
+              return yield* makeUnknownConfig();
+            }
+            const currentOptions = yield* Ref.get(configOptionsRef);
+            const existing = currentOptions.find((o) => o.id === "model");
+            const newValue = String(value);
+            if (existing && existing.currentValue === newValue) {
+              return {
+                configOptions: currentOptions,
+              } as EffectAcpSchema.SetSessionConfigOptionResponse;
+            }
+            // Update the current value
+            const updated = currentOptions.map((o) =>
+              o.id === "model" ? { ...o, currentValue: newValue } : o,
+            ) as ReadonlyArray<EffectAcpSchema.SessionConfigOption>;
+            yield* Ref.set(configOptionsRef, updated);
+            yield* Ref.update(updatesRef, (n) => n + 1);
+            return { configOptions: updated } as EffectAcpSchema.SetSessionConfigOptionResponse;
+          }),
+        configOptionChanges: Stream.empty,
+        getEvents: () => Stream.empty,
+        drainEvents: Effect.void,
+        getModeState: Effect.succeed(
+          undefined as
+            | {
+                currentModeId: string;
+                availableModes: ReadonlyArray<{
+                  readonly id: string;
+                  readonly name: string;
+                  readonly description?: string;
+                }>;
+              }
+            | undefined,
+        ),
+        initialize: makeNotImplemented,
+        start: makeNotImplemented,
+        loadSession: makeNotImplemented,
+        resumeSession: makeNotImplemented,
+        forkSession: makeNotImplemented,
+        listSessions: makeNotImplemented,
+        closeSession: makeNotImplemented,
+        deleteSession: makeNotImplemented,
+        listProviders: makeNotImplemented(),
+        setProvider: makeNotImplemented,
+        disableProvider: makeNotImplemented,
+        logout: makeNotImplemented(),
+        prompt: makeNotImplemented,
+        cancel: makeNotImplemented(),
+        setMode: makeNotImplemented,
+        setSessionModel: makeNotImplemented,
+        setModel: makeNotImplemented,
+        request: makeNotImplemented,
+        notify: makeNotImplemented,
+      } as unknown as AcpSessionRuntime.AcpSessionRuntime["Service"];
+
+      return { runtime, updatesRef };
+    });
+
+  it.effect("switches to the requested model when different from current", () =>
+    Effect.gen(function* () {
+      const { runtime, updatesRef } = yield* makeTestRuntime();
+
+      const selection: ModelSelection = {
+        instanceId: ProviderInstanceId.make("test-instance"),
+        model: "other-model",
+      };
+      const result = yield* commandcodeModelSwitchHook(runtime, selection);
+
+      assert.equal(result, "other-model");
+      const updates = yield* Ref.get(updatesRef);
+      assert.equal(updates, 1);
+    }),
+  );
+
+  it.effect("returns current model when requested model is the same", () =>
+    Effect.gen(function* () {
+      const { runtime, updatesRef } = yield* makeTestRuntime();
+
+      const selection: ModelSelection = {
+        instanceId: ProviderInstanceId.make("test-instance"),
+        model: "default-model",
+      };
+      const result = yield* commandcodeModelSwitchHook(runtime, selection);
+
+      assert.equal(result, "default-model");
+      const updates = yield* Ref.get(updatesRef);
+      assert.equal(updates, 0);
+    }),
+  );
+
+  it.effect("returns current model when requested is empty or 'default'", () =>
+    Effect.gen(function* () {
+      const { runtime, updatesRef } = yield* makeTestRuntime();
+
+      const emptySelection: ModelSelection = {
+        instanceId: ProviderInstanceId.make("test-instance"),
+        model: "",
+      };
+      const result1 = yield* commandcodeModelSwitchHook(runtime, emptySelection);
+      assert.equal(result1, "default-model");
+
+      const defaultSelection: ModelSelection = {
+        instanceId: ProviderInstanceId.make("test-instance"),
+        model: "default",
+      };
+      const result2 = yield* commandcodeModelSwitchHook(runtime, defaultSelection);
+      assert.equal(result2, "default-model");
+
+      const updates = yield* Ref.get(updatesRef);
+      assert.equal(updates, 0);
+    }),
+  );
+
+  it.effect("allows unlisted model values when allowUnlistedValue is true", () =>
+    Effect.gen(function* () {
+      const { runtime, updatesRef } = yield* makeTestRuntime();
+
+      const selection: ModelSelection = {
+        instanceId: ProviderInstanceId.make("test-instance"),
+        model: "custom-model-id",
+      };
+      const result = yield* commandcodeModelSwitchHook(runtime, selection);
+
+      assert.equal(result, "custom-model-id");
+      const updates = yield* Ref.get(updatesRef);
+      assert.equal(updates, 1);
     }),
   );
 });

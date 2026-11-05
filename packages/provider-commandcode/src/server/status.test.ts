@@ -199,7 +199,10 @@ describe("checkCommandcodeProviderStatus", () => {
       assert.equal(unknown.draft.status, "warning");
       assert.equal(unknown.draft.auth.status, "unknown");
 
-      assert.strictEqual(signedIn.draft.models[0]?.capabilities?._meta?.totalContextTokens, 1048576);
+      assert.strictEqual(
+        signedIn.draft.models[0]?.capabilities?._meta?.totalContextTokens,
+        1048576,
+      );
     }),
   );
 
