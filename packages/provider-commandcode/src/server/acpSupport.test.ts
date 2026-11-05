@@ -11,7 +11,7 @@ import * as Ref from "effect/Ref";
 import * as EffectAcpSchema from "effect-acp/compat";
 import * as EffectAcpErrors from "effect-acp/errors";
 
-import { vi } from "vitest";
+import { vi } from "vite-plus/test";
 import type { AcpToolCallState } from "@t3tools/provider-acp/server/runtimeModel";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 
@@ -33,15 +33,21 @@ import { ModelSelection, ProviderInstanceId } from "@t3tools/contracts";
 vi.mock("@t3tools/provider-core/server/ProviderAdapter", () => {
   return {
     ProviderAdapterV2RuntimePolicy: {
-      make: vi.fn((policyConfig) => {
-        return {
-          runtimeMode: policyConfig.runtimeMode,
-          interactionMode: "default",
-          cwd: "/work",
-          approvalPolicy: policyConfig.approvalPolicy,
-          sandboxPolicy: policyConfig.sandboxPolicy,
-        };
-      }),
+      make: vi.fn(
+        (policyConfig: {
+          readonly runtimeMode: string;
+          readonly approvalPolicy?: string;
+          readonly sandboxPolicy?: string;
+        }) => {
+          return {
+            runtimeMode: policyConfig.runtimeMode,
+            interactionMode: "default",
+            cwd: "/work",
+            approvalPolicy: policyConfig.approvalPolicy,
+            sandboxPolicy: policyConfig.sandboxPolicy,
+          };
+        },
+      ),
     },
   };
 });
@@ -66,7 +72,11 @@ vi.mock("./acpSupport", async (importOriginal) => {
     commandcodeBinaryPath: original.commandcodeBinaryPath,
     commandcodeRuntimeModeForSessionMode: original.commandcodeRuntimeModeForSessionMode,
     commandcodeSessionModeForPolicy: vi.fn(
-      (policy: { runtimeMode: string; approvalPolicy?: string; sandboxPolicy?: string }) => {
+      (policy: {
+        readonly runtimeMode: string;
+        readonly approvalPolicy?: string;
+        readonly sandboxPolicy?: string;
+      }) => {
         if (policy.approvalPolicy !== undefined || policy.sandboxPolicy !== undefined) {
           return "default";
         }
