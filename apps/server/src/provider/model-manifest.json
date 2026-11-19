@@ -1,10 +1,6 @@
 {
   "version": 1,
-<<<<<<< HEAD
   "updatedAt": "2026-11-02T23:47:11Z",
-=======
-  "updatedAt": "2026-11-02T00:00:00Z",
->>>>>>> add966b0d9 (feat(commandcode): add Command Code as a provider)
   "compatibility": [
     {
       "driver": "codex",
