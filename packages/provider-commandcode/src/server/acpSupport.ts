@@ -172,15 +172,25 @@ export function extractCommandcodeSubagentUpdate(
     .text;
   const status =
     tool.status === "completed" ? "completed" : tool.status === "failed" ? "failed" : "running";
-  return {
+  // Build a human-readable title: prefer the description, then fall back to
+  // the raw subagent_type. The type is the agent's own enum id (e.g.
+  // "explore", "plan"), so it is surfaced verbatim rather than prettified.
+  const title = request.description?.trim() ?? request.subagent_type?.trim() ?? "subagent";
+  const update: AcpAdapterV2SubagentUpdate = {
     nativeTaskId: tool.toolCallId,
     childSessionId: null,
     prompt: request.prompt,
-    title: request.description ?? request.subagent_type,
+    title,
     model: request.model ?? null,
     status,
     result: status === "running" ? null : (text ?? null),
   };
+  // Suppress raw tool output for background subagents so only the structured
+  // activity row appears in the thread UI.
+  if (request.run_in_background === true) {
+    return { ...update, suppressNormalTool: true };
+  }
+  return update;
 }
 
 export interface CommandcodePlanPathHost {

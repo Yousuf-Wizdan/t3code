@@ -15,6 +15,7 @@
       ],
       "vite": { "entry": [".github/**/*.test.cjs"] },
       "vitest": { "entry": [".github/**/*.test.cjs"] },
+      "ignoreDependencies": ["@effect/tsgo"],
     },
     "scripts": {
       // Knip loads its preprocessor through a CLI option; native verification and

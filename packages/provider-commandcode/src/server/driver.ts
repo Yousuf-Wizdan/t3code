@@ -1,4 +1,5 @@
 import { CommandcodeSettings } from "../settings.ts";
+import { AcpRegistryOperationError } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import type * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
@@ -43,6 +44,7 @@ import {
 import { makeCommandcodeTextGeneration } from "./textGeneration.ts";
 import { commandcodeUsageReader } from "./usage.ts";
 import { COMMANDCODE_DRIVER_KIND, commandcodeBinaryPath } from "./acpSupport.ts";
+import { listCommandcodeSessions, deleteCommandcodeSession } from "./sessions.ts";
 
 const decodeCommandcodeSettings = Schema.decodeSync(CommandcodeSettings);
 
@@ -204,6 +206,10 @@ export const CommandcodeDriver: ProviderDriver<
       processEnv,
     );
 
+    // Provide filesystem service to session management and usage probe effects
+    const provideFs = <A, E, R>(eff: Effect.Effect<A, E, R | FileSystem.FileSystem>) =>
+      eff.pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
+
     return {
       instanceId,
       driverKind: COMMANDCODE_DRIVER_KIND,
@@ -230,6 +236,42 @@ export const CommandcodeDriver: ProviderDriver<
       invalidateCaches: clearCommandcodeLiveCommands(instanceId),
       orchestrationAdapter,
       textGeneration,
+      acpSessionManagement: {
+        listSessions: ({ cwd, cursor }) =>
+          provideFs(listCommandcodeSessions(cwd, processEnv, cursor)),
+        deleteSession: ({ cwd, sessionId }) =>
+          provideFs(deleteCommandcodeSession(cwd, sessionId, processEnv)),
+        // Command Code's ACP doesn't expose logout, provider list/set.
+        // We surface friendly "not supported" errors so the UI can hide the buttons.
+        logout: (_cwd) =>
+          Effect.fail(
+            new AcpRegistryOperationError({
+              reason: "logout_unsupported",
+              message: "To sign out of Command Code, run `cmdc logout` in a terminal.",
+            }),
+          ),
+        listProviders: (_cwd) =>
+          Effect.fail(
+            new AcpRegistryOperationError({
+              reason: "providers_unsupported",
+              message: "Command Code does not support provider configuration via T3.",
+            }),
+          ),
+        setProvider: (_input) =>
+          Effect.fail(
+            new AcpRegistryOperationError({
+              reason: "providers_unsupported",
+              message: "Command Code does not support provider configuration via T3.",
+            }),
+          ),
+        disableProvider: (_input) =>
+          Effect.fail(
+            new AcpRegistryOperationError({
+              reason: "providers_unsupported",
+              message: "Command Code does not support provider configuration via T3.",
+            }),
+          ),
+      },
     } satisfies ProviderInstance;
   }),
 };
